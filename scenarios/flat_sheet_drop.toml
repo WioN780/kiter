@@ -1,0 +1,3 @@
+name = "Flat Sheet Drop Validation"
+gravity = [0.0, -9.81, 0.0]
+duration = 5.0
