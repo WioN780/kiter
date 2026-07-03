@@ -1,7 +1,21 @@
-use crate::world::{World, Event};
 use crate::constraints::ConstraintState;
-use glam::{DVec3, DQuat};
+use crate::world::{Event, World};
+use glam::{DQuat, DVec3};
 use rayon::prelude::*;
+
+/// Below this many total constraints the parallel path is skipped: rayon task
+/// overhead outweighs the per-constraint work on small scenes.
+// ponytail: fixed threshold; revisit with profiling data if a mid-size scene regresses
+pub const PARALLEL_CONSTRAINT_THRESHOLD: usize = 512;
+
+fn total_solver_constraints(world: &World) -> usize {
+    world.distance_constraints.len()
+        + world.bending_constraints.len()
+        + world.stretch_shear_constraints.len()
+        + world.bend_twist_constraints.len()
+        + world.dihedral_bending_constraints.len()
+        + world.unilateral_constraints.len()
+}
 
 /// Helper to get the scaled rotation vector (axis * angle) from a unit quaternion.
 fn scaled_axis_from_quat(q: DQuat) -> DVec3 {
@@ -29,7 +43,35 @@ pub fn step_simulation(world: &mut World, dt: f64) {
     }
     let h = dt / world.cfg.substeps as f64;
 
+    // Parallel solve is opted into via explicit config, disabled entirely in
+    // reference-mode builds (bit-exact serial regression baseline), and skipped
+    // for scenes too small to amortize rayon overhead. Constraint counts cannot
+    // change inside a step (breaking only flips state flags), so the coloring
+    // staleness check happens once here.
+    let use_parallel = !cfg!(feature = "reference-mode")
+        && world.cfg.parallel_solve
+        && total_solver_constraints(world) >= PARALLEL_CONSTRAINT_THRESHOLD;
+
+    let coloring_opt = if use_parallel {
+        let stale = world.coloring.as_ref().is_none_or(|c| c.is_stale(world));
+        if stale {
+            world.coloring = Some(SolverColoring::rebuild(world));
+        }
+        world.coloring.take() // moved out to satisfy the borrow checker; restored below
+    } else {
+        None
+    };
+
+    // Control bar (Milestone 10c): same take/restore dance as `coloring`.
+    let mut bar_opt = world.control_bar.take();
+
     for _ in 0..world.cfg.substeps {
+        // 0. Drive the kinematic anchor particles from the rigid bar tips
+        //    (masterplan §5.5 boundary exchange, pre-substep half).
+        if let Some(bar) = &bar_opt {
+            bar.sync_anchors_to_world(world);
+        }
+
         // 1. Apply external forces (gravity + point forces) to update particle velocities
         for i in 0..world.particles.len() {
             if world.particles.inv_mass[i] > 0.0 {
@@ -57,6 +99,10 @@ pub fn step_simulation(world: &mut World, dt: f64) {
 
         // 1d. Apply canopy aerodynamics to particle velocities
         crate::aero::panel_method::apply_canopy_aerodynamics(world, h);
+
+        // 1d2. Unsteady aero corrections (added mass) — the §6.4 seam,
+        // applied after the quasi-steady base forces.
+        crate::aero::unsteady::apply_aero_corrections(world, h);
 
         // 1e. Apply spar cylinder drag to particle velocities
         crate::aero::spar_drag::apply_spar_drag(world, h);
@@ -101,26 +147,18 @@ pub fn step_simulation(world: &mut World, dt: f64) {
             Vec::new()
         };
 
-        // Temporarily extract coloring from world to satisfy the borrow checker
-        let mut coloring_opt = world.coloring.take();
-        #[cfg(feature = "reference-mode")]
-        let use_parallel = false;
-        #[cfg(not(feature = "reference-mode"))]
-        let use_parallel = world.cfg.parallel_solve;
-
-        if use_parallel && coloring_opt.is_none() {
-            coloring_opt = Some(SolverColoring::rebuild(world));
-        }
-
         // 5. Solve constraints iteratively (Gauss-Seidel sweeps)
         for _ in 0..world.cfg.iterations_per_substep {
-            if use_parallel {
-                let coloring = coloring_opt.as_ref().unwrap();
+            if let Some(coloring) = &coloring_opt {
                 solve_distance_constraints_parallel(world, h, &coloring.distance_colors);
                 solve_bending_constraints_parallel(world, h, &coloring.bending_colors);
                 solve_stretch_shear_constraints_parallel(world, h, &coloring.stretch_shear_colors);
                 solve_bend_twist_constraints_parallel(world, h, &coloring.bend_twist_colors);
-                solve_dihedral_bending_constraints_parallel(world, h, &coloring.dihedral_bending_colors);
+                solve_dihedral_bending_constraints_parallel(
+                    world,
+                    h,
+                    &coloring.dihedral_bending_colors,
+                );
                 solve_unilateral_constraints_parallel(world, h, &coloring.unilateral_colors);
             } else {
                 solve_distance_constraints(world, h);
@@ -139,15 +177,13 @@ pub fn step_simulation(world: &mut World, dt: f64) {
             }
         }
 
-        // Restore coloring to world
-        world.coloring = coloring_opt;
-
         // 6. Update velocities: v = (x_pred - x_prev) / h
         // and apply velocity damping
         let damping_factor = (-world.cfg.damping * h).exp();
         for i in 0..world.particles.len() {
             if world.particles.inv_mass[i] > 0.0 {
-                world.particles.vel[i] = (world.particles.pred_pos[i] - world.particles.prev_pos[i]) / h;
+                world.particles.vel[i] =
+                    (world.particles.pred_pos[i] - world.particles.prev_pos[i]) / h;
                 world.particles.vel[i] *= damping_factor;
             } else {
                 world.particles.vel[i] = DVec3::ZERO;
@@ -173,6 +209,20 @@ pub fn step_simulation(world: &mut World, dt: f64) {
 
         // 8b. Process yield and breaking constraints at the end of the substep
         process_yield_and_breaking(world, h);
+
+        // 8c. Feed the recovered line forces (F = λ/h²) back to the bar tips
+        //     and advance the Rapier accessory world by h (§5.5, post half).
+        if let Some(bar) = &mut bar_opt {
+            let gravity = world.cfg.gravity;
+            bar.apply_line_forces_and_step(world, h, gravity);
+        }
+    }
+
+    if coloring_opt.is_some() {
+        world.coloring = coloring_opt;
+    }
+    if bar_opt.is_some() {
+        world.control_bar = bar_opt;
     }
 }
 
@@ -324,8 +374,9 @@ fn solve_stretch_shear_constraints(world: &mut World, h: f64) {
                 j_rot_local.y * w_q.y * delta_lambda,
                 j_rot_local.z * w_q.z * delta_lambda,
             );
-            world.orientations.quat[c.q_index] =
-                (world.orientations.quat[c.q_index] * DQuat::from_scaled_axis(delta_theta_local)).normalize();
+            world.orientations.quat[c.q_index] = (world.orientations.quat[c.q_index]
+                * DQuat::from_scaled_axis(delta_theta_local))
+            .normalize();
         }
     }
 }
@@ -382,8 +433,10 @@ fn solve_bend_twist_constraints(world: &mut World, h: f64) {
             let j0 = -0.5 * (r_w * e_k - e_k.cross(r_vec));
             let j1 = 0.5 * (r_w * e_k + e_k.cross(r_vec));
 
-            let w_rot0 = (j0.x.powi(2) * w_q1.x) + (j0.y.powi(2) * w_q1.y) + (j0.z.powi(2) * w_q1.z);
-            let w_rot1 = (j1.x.powi(2) * w_q2.x) + (j1.y.powi(2) * w_q2.y) + (j1.z.powi(2) * w_q2.z);
+            let w_rot0 =
+                (j0.x.powi(2) * w_q1.x) + (j0.y.powi(2) * w_q1.y) + (j0.z.powi(2) * w_q1.z);
+            let w_rot1 =
+                (j1.x.powi(2) * w_q2.x) + (j1.y.powi(2) * w_q2.y) + (j1.z.powi(2) * w_q2.z);
 
             let alpha_tilde = comp[k] / h2;
             let denom = w_rot0 + w_rot1 + alpha_tilde;
@@ -400,16 +453,18 @@ fn solve_bend_twist_constraints(world: &mut World, h: f64) {
                 j0.y * w_q1.y * delta_lambda,
                 j0.z * w_q1.z * delta_lambda,
             );
-            world.orientations.quat[b.q1_index] =
-                (world.orientations.quat[b.q1_index] * DQuat::from_scaled_axis(delta_theta_local_1)).normalize();
+            world.orientations.quat[b.q1_index] = (world.orientations.quat[b.q1_index]
+                * DQuat::from_scaled_axis(delta_theta_local_1))
+            .normalize();
 
             let delta_theta_local_2 = DVec3::new(
                 j1.x * w_q2.x * delta_lambda,
                 j1.y * w_q2.y * delta_lambda,
                 j1.z * w_q2.z * delta_lambda,
             );
-            world.orientations.quat[b.q2_index] =
-                (world.orientations.quat[b.q2_index] * DQuat::from_scaled_axis(delta_theta_local_2)).normalize();
+            world.orientations.quat[b.q2_index] = (world.orientations.quat[b.q2_index]
+                * DQuat::from_scaled_axis(delta_theta_local_2))
+            .normalize();
         }
     }
 }
@@ -429,7 +484,9 @@ fn process_yield_and_breaking(world: &mut World, h: f64) {
         if moment > b.yield_threshold {
             if b.is_inflatable {
                 b.state = ConstraintState::Folded;
-                world.events.push(Event::LeadingEdgeFolded { joint_index: idx });
+                world
+                    .events
+                    .push(Event::LeadingEdgeFolded { joint_index: idx });
             } else {
                 b.state = ConstraintState::Broken;
                 world.events.push(Event::SparBroken { joint_index: idx });
@@ -633,9 +690,19 @@ fn apply_line_drag(world: &mut World, h: f64) {
 }
 
 // =========================================================================
-// Parallel Solver & Graph-Coloring Implementations
+// Parallel solver: graph coloring + rayon (masterplan §8.5)
+//
+// Constraints that share no particle/orientation index are grouped into
+// color classes; each class is solved in parallel (its members touch
+// disjoint state, so the raw-pointer writes below are race-free), classes
+// run sequentially to preserve Gauss-Seidel-style convergence. Within a
+// class the result is order-independent, so parallel runs are themselves
+// deterministic; only the class-vs-index *ordering* differs from serial
+// mode, which perturbs results within physical tolerance.
 // =========================================================================
 
+/// Raw-pointer wrapper asserting to the compiler that our graph coloring
+/// guarantees disjoint access across rayon workers.
 struct SendPtr<T>(*mut T);
 
 impl<T> Copy for SendPtr<T> {}
@@ -650,225 +717,129 @@ unsafe impl<T> Send for SendPtr<T> {}
 unsafe impl<T> Sync for SendPtr<T> {}
 
 impl<T> SendPtr<T> {
-    pub unsafe fn add(self, offset: usize) -> *mut T {
+    unsafe fn add(self, offset: usize) -> *mut T {
         self.0.add(offset)
     }
 }
 
-#[derive(Clone, Debug, Default)]
-pub struct SolverColoring {
-    pub distance_colors: Vec<Vec<usize>>,
-    pub bending_colors: Vec<Vec<usize>>,
-    pub stretch_shear_colors: Vec<Vec<usize>>,
-    pub bend_twist_colors: Vec<Vec<usize>>,
-    pub dihedral_bending_colors: Vec<Vec<usize>>,
-    pub unilateral_colors: Vec<Vec<usize>>,
+/// Runs `f` over a color class, in parallel only when the class is big enough
+/// for rayon dispatch to pay off; small classes (including the tail classes
+/// greedy coloring produces) run inline on the calling thread.
+// ponytail: thresholds picked from the 8-core bench crossover; revisit with profiling
+fn for_each_maybe_parallel(indices: &[usize], f: impl Fn(usize) + Send + Sync) {
+    const MIN_PAR_CLASS: usize = 256;
+    if indices.len() < MIN_PAR_CLASS {
+        for &idx in indices {
+            f(idx);
+        }
+    } else {
+        indices.par_iter().with_min_len(128).for_each(|&idx| f(idx));
+    }
+}
+
+/// Greedy graph coloring over one constraint list. `touches` reports the
+/// particle and orientation indices a constraint reads or writes; two
+/// constraints sharing any index never land in the same color class.
+fn greedy_color<T>(
+    items: &[T],
+    n_particles: usize,
+    n_orientations: usize,
+    touches: impl Fn(&T) -> (Vec<usize>, Vec<usize>),
+) -> Vec<Vec<usize>> {
+    let mut colors: Vec<Vec<usize>> = Vec::new();
+    let mut p_used: Vec<Vec<bool>> = Vec::new();
+    let mut q_used: Vec<Vec<bool>> = Vec::new();
+
+    for (idx, item) in items.iter().enumerate() {
+        let (ps, qs) = touches(item);
+        let slot = (0..colors.len())
+            .find(|&c| ps.iter().all(|&p| !p_used[c][p]) && qs.iter().all(|&q| !q_used[c][q]));
+        let c = slot.unwrap_or_else(|| {
+            colors.push(Vec::new());
+            p_used.push(vec![false; n_particles]);
+            q_used.push(vec![false; n_orientations]);
+            colors.len() - 1
+        });
+        for &p in &ps {
+            p_used[c][p] = true;
+        }
+        for &q in &qs {
+            q_used[c][q] = true;
+        }
+        colors[c].push(idx);
+    }
+    colors
+}
+
+/// Cached color classes for every constraint type, fingerprinted by the
+/// constraint counts so it self-invalidates when constraints are added or
+/// removed between steps. (Constraint *indices* are stable within a run —
+/// breaking flips a state flag, it never removes elements — so counts are
+/// a sufficient staleness signal.)
+pub(crate) struct SolverColoring {
+    fingerprint: [usize; 6],
+    pub(crate) distance_colors: Vec<Vec<usize>>,
+    pub(crate) bending_colors: Vec<Vec<usize>>,
+    pub(crate) stretch_shear_colors: Vec<Vec<usize>>,
+    pub(crate) bend_twist_colors: Vec<Vec<usize>>,
+    pub(crate) dihedral_bending_colors: Vec<Vec<usize>>,
+    pub(crate) unilateral_colors: Vec<Vec<usize>>,
 }
 
 impl SolverColoring {
-    pub fn rebuild(world: &World) -> Self {
-        let n_particles = world.particles.len();
-        let n_orientations = world.orientations.len();
+    fn fingerprint_of(world: &World) -> [usize; 6] {
+        [
+            world.distance_constraints.len(),
+            world.bending_constraints.len(),
+            world.stretch_shear_constraints.len(),
+            world.bend_twist_constraints.len(),
+            world.dihedral_bending_constraints.len(),
+            world.unilateral_constraints.len(),
+        ]
+    }
 
-        let distance_colors = color_distance_constraints(&world.distance_constraints, n_particles);
-        let bending_colors = color_bending_constraints(&world.bending_constraints, n_particles);
-        let stretch_shear_colors = color_stretch_shear_constraints(&world.stretch_shear_constraints, n_particles, n_orientations);
-        let bend_twist_colors = color_bend_twist_constraints(&world.bend_twist_constraints, n_orientations);
-        let dihedral_bending_colors = color_dihedral_bending_constraints(&world.dihedral_bending_constraints, n_particles);
-        let unilateral_colors = color_unilateral_constraints(&world.unilateral_constraints, n_particles);
+    pub(crate) fn is_stale(&self, world: &World) -> bool {
+        self.fingerprint != Self::fingerprint_of(world)
+    }
+
+    pub(crate) fn rebuild(world: &World) -> Self {
+        let n_p = world.particles.len();
+        let n_q = world.orientations.len();
 
         Self {
-            distance_colors,
-            bending_colors,
-            stretch_shear_colors,
-            bend_twist_colors,
-            dihedral_bending_colors,
-            unilateral_colors,
+            fingerprint: Self::fingerprint_of(world),
+            distance_colors: greedy_color(&world.distance_constraints, n_p, n_q, |c| {
+                (vec![c.p1, c.p2], vec![])
+            }),
+            bending_colors: greedy_color(&world.bending_constraints, n_p, n_q, |b| {
+                (vec![b.p1, b.p2, b.p3], vec![])
+            }),
+            stretch_shear_colors: greedy_color(&world.stretch_shear_constraints, n_p, n_q, |c| {
+                (vec![c.p1, c.p2], vec![c.q_index])
+            }),
+            bend_twist_colors: greedy_color(&world.bend_twist_constraints, n_p, n_q, |b| {
+                (vec![], vec![b.q1_index, b.q2_index])
+            }),
+            dihedral_bending_colors: greedy_color(
+                &world.dihedral_bending_constraints,
+                n_p,
+                n_q,
+                |b| (vec![b.p1, b.p2, b.p3, b.p4], vec![]),
+            ),
+            unilateral_colors: greedy_color(&world.unilateral_constraints, n_p, n_q, |c| {
+                (vec![c.p1, c.p2], vec![])
+            }),
         }
     }
 }
-
-fn color_distance_constraints(constraints: &[crate::constraints::DistanceConstraint], n_particles: usize) -> Vec<Vec<usize>> {
-    let mut colors: Vec<Vec<usize>> = Vec::new();
-    let mut color_used: Vec<Vec<bool>> = Vec::new();
-
-    for (idx, c) in constraints.iter().enumerate() {
-        let mut found_color = None;
-        for (c_idx, used) in color_used.iter().enumerate() {
-            if !used[c.p1] && !used[c.p2] {
-                found_color = Some(c_idx);
-                break;
-            }
-        }
-        if let Some(c_idx) = found_color {
-            colors[c_idx].push(idx);
-            color_used[c_idx][c.p1] = true;
-            color_used[c_idx][c.p2] = true;
-        } else {
-            let mut used = vec![false; n_particles];
-            used[c.p1] = true;
-            used[c.p2] = true;
-            color_used.push(used);
-            colors.push(vec![idx]);
-        }
-    }
-    colors
-}
-
-fn color_bending_constraints(constraints: &[crate::constraints::BendingConstraint], n_particles: usize) -> Vec<Vec<usize>> {
-    let mut colors: Vec<Vec<usize>> = Vec::new();
-    let mut color_used: Vec<Vec<bool>> = Vec::new();
-
-    for (idx, c) in constraints.iter().enumerate() {
-        let mut found_color = None;
-        for (c_idx, used) in color_used.iter().enumerate() {
-            if !used[c.p1] && !used[c.p2] && !used[c.p3] {
-                found_color = Some(c_idx);
-                break;
-            }
-        }
-        if let Some(c_idx) = found_color {
-            colors[c_idx].push(idx);
-            color_used[c_idx][c.p1] = true;
-            color_used[c_idx][c.p2] = true;
-            color_used[c_idx][c.p3] = true;
-        } else {
-            let mut used = vec![false; n_particles];
-            used[c.p1] = true;
-            used[c.p2] = true;
-            used[c.p3] = true;
-            color_used.push(used);
-            colors.push(vec![idx]);
-        }
-    }
-    colors
-}
-
-fn color_stretch_shear_constraints(constraints: &[crate::constraints::StretchShearConstraint], n_particles: usize, n_orientations: usize) -> Vec<Vec<usize>> {
-    let mut colors: Vec<Vec<usize>> = Vec::new();
-    let mut color_p_used: Vec<Vec<bool>> = Vec::new();
-    let mut color_q_used: Vec<Vec<bool>> = Vec::new();
-
-    for (idx, c) in constraints.iter().enumerate() {
-        let mut found_color = None;
-        for (c_idx, (p_used, q_used)) in color_p_used.iter().zip(color_q_used.iter()).enumerate() {
-            if !p_used[c.p1] && !p_used[c.p2] && !q_used[c.q_index] {
-                found_color = Some(c_idx);
-                break;
-            }
-        }
-        if let Some(c_idx) = found_color {
-            colors[c_idx].push(idx);
-            color_p_used[c_idx][c.p1] = true;
-            color_p_used[c_idx][c.p2] = true;
-            color_q_used[c_idx][c.q_index] = true;
-        } else {
-            let mut p_used = vec![false; n_particles];
-            let mut q_used = vec![false; n_orientations];
-            p_used[c.p1] = true;
-            p_used[c.p2] = true;
-            q_used[c.q_index] = true;
-            color_p_used.push(p_used);
-            color_q_used.push(q_used);
-            colors.push(vec![idx]);
-        }
-    }
-    colors
-}
-
-fn color_bend_twist_constraints(constraints: &[crate::constraints::BendTwistConstraint], n_orientations: usize) -> Vec<Vec<usize>> {
-    let mut colors: Vec<Vec<usize>> = Vec::new();
-    let mut color_used: Vec<Vec<bool>> = Vec::new();
-
-    for (idx, b) in constraints.iter().enumerate() {
-        let mut found_color = None;
-        for (c_idx, used) in color_used.iter().enumerate() {
-            if !used[b.q1_index] && !used[b.q2_index] {
-                found_color = Some(c_idx);
-                break;
-            }
-        }
-        if let Some(c_idx) = found_color {
-            colors[c_idx].push(idx);
-            color_used[c_idx][b.q1_index] = true;
-            color_used[c_idx][b.q2_index] = true;
-        } else {
-            let mut used = vec![false; n_orientations];
-            used[b.q1_index] = true;
-            used[b.q2_index] = true;
-            color_used.push(used);
-            colors.push(vec![idx]);
-        }
-    }
-    colors
-}
-
-fn color_dihedral_bending_constraints(constraints: &[crate::constraints::DihedralBendingConstraint], n_particles: usize) -> Vec<Vec<usize>> {
-    let mut colors: Vec<Vec<usize>> = Vec::new();
-    let mut color_used: Vec<Vec<bool>> = Vec::new();
-
-    for (idx, b) in constraints.iter().enumerate() {
-        let mut found_color = None;
-        for (c_idx, used) in color_used.iter().enumerate() {
-            if !used[b.p1] && !used[b.p2] && !used[b.p3] && !used[b.p4] {
-                found_color = Some(c_idx);
-                break;
-            }
-        }
-        if let Some(c_idx) = found_color {
-            colors[c_idx].push(idx);
-            color_used[c_idx][b.p1] = true;
-            color_used[c_idx][b.p2] = true;
-            color_used[c_idx][b.p3] = true;
-            color_used[c_idx][b.p4] = true;
-        } else {
-            let mut used = vec![false; n_particles];
-            used[b.p1] = true;
-            used[b.p2] = true;
-            used[b.p3] = true;
-            used[b.p4] = true;
-            color_used.push(used);
-            colors.push(vec![idx]);
-        }
-    }
-    colors
-}
-
-fn color_unilateral_constraints(constraints: &[crate::constraints::UnilateralDistanceConstraint], n_particles: usize) -> Vec<Vec<usize>> {
-    let mut colors: Vec<Vec<usize>> = Vec::new();
-    let mut color_used: Vec<Vec<bool>> = Vec::new();
-
-    for (idx, c) in constraints.iter().enumerate() {
-        let mut found_color = None;
-        for (c_idx, used) in color_used.iter().enumerate() {
-            if !used[c.p1] && !used[c.p2] {
-                found_color = Some(c_idx);
-                break;
-            }
-        }
-        if let Some(c_idx) = found_color {
-            colors[c_idx].push(idx);
-            color_used[c_idx][c.p1] = true;
-            color_used[c_idx][c.p2] = true;
-        } else {
-            let mut used = vec![false; n_particles];
-            used[c.p1] = true;
-            used[c.p2] = true;
-            color_used.push(used);
-            colors.push(vec![idx]);
-        }
-    }
-    colors
-}
-
-pub fn solve_distance_constraints_parallel(world: &mut World, h: f64, colors: &[Vec<usize>]) {
+fn solve_distance_constraints_parallel(world: &mut World, h: f64, colors: &[Vec<usize>]) {
     let h2 = h * h;
     let pred_pos_ptr = SendPtr(world.particles.pred_pos.as_mut_ptr());
     let inv_mass_ptr = SendPtr(world.particles.inv_mass.as_ptr() as *mut f64);
     let constraints_ptr = SendPtr(world.distance_constraints.as_mut_ptr());
 
     for color_class in colors {
-        color_class.par_iter().for_each(|&idx| unsafe {
+        for_each_maybe_parallel(color_class, |idx| unsafe {
             let c = &mut *constraints_ptr.add(idx);
             let w1 = *inv_mass_ptr.add(c.p1);
             let w2 = *inv_mass_ptr.add(c.p2);
@@ -908,14 +879,14 @@ pub fn solve_distance_constraints_parallel(world: &mut World, h: f64, colors: &[
     }
 }
 
-pub fn solve_bending_constraints_parallel(world: &mut World, h: f64, colors: &[Vec<usize>]) {
+fn solve_bending_constraints_parallel(world: &mut World, h: f64, colors: &[Vec<usize>]) {
     let h2 = h * h;
     let pred_pos_ptr = SendPtr(world.particles.pred_pos.as_mut_ptr());
     let inv_mass_ptr = SendPtr(world.particles.inv_mass.as_ptr() as *mut f64);
     let constraints_ptr = SendPtr(world.bending_constraints.as_mut_ptr());
 
     for color_class in colors {
-        color_class.par_iter().for_each(|&idx| unsafe {
+        for_each_maybe_parallel(color_class, |idx| unsafe {
             let b = &mut *constraints_ptr.add(idx);
             let w1 = *inv_mass_ptr.add(b.p1);
             let w2 = *inv_mass_ptr.add(b.p2);
@@ -954,16 +925,17 @@ pub fn solve_bending_constraints_parallel(world: &mut World, h: f64, colors: &[V
     }
 }
 
-pub fn solve_stretch_shear_constraints_parallel(world: &mut World, h: f64, colors: &[Vec<usize>]) {
+fn solve_stretch_shear_constraints_parallel(world: &mut World, h: f64, colors: &[Vec<usize>]) {
     let h2 = h * h;
     let pred_pos_ptr = SendPtr(world.particles.pred_pos.as_mut_ptr());
     let inv_mass_ptr = SendPtr(world.particles.inv_mass.as_ptr() as *mut f64);
     let orientations_quat_ptr = SendPtr(world.orientations.quat.as_mut_ptr());
-    let orientations_inv_inertia_ptr = SendPtr(world.orientations.inv_inertia.as_ptr() as *mut DVec3);
+    let orientations_inv_inertia_ptr =
+        SendPtr(world.orientations.inv_inertia.as_ptr() as *mut DVec3);
     let constraints_ptr = SendPtr(world.stretch_shear_constraints.as_mut_ptr());
 
     for color_class in colors {
-        color_class.par_iter().for_each(|&idx| unsafe {
+        for_each_maybe_parallel(color_class, |idx| unsafe {
             let c = &mut *constraints_ptr.add(idx);
             let w1 = *inv_mass_ptr.add(c.p1);
             let w2 = *inv_mass_ptr.add(c.p2);
@@ -1023,22 +995,24 @@ pub fn solve_stretch_shear_constraints_parallel(world: &mut World, h: f64, color
                     j_rot_local.y * w_q.y * delta_lambda,
                     j_rot_local.z * w_q.z * delta_lambda,
                 );
-                *orientations_quat_ptr.add(c.q_index) =
-                    (*orientations_quat_ptr.add(c.q_index) * DQuat::from_scaled_axis(delta_theta_local)).normalize();
+                *orientations_quat_ptr.add(c.q_index) = (*orientations_quat_ptr.add(c.q_index)
+                    * DQuat::from_scaled_axis(delta_theta_local))
+                .normalize();
             }
         });
     }
 }
 
-pub fn solve_bend_twist_constraints_parallel(world: &mut World, h: f64, colors: &[Vec<usize>]) {
+fn solve_bend_twist_constraints_parallel(world: &mut World, h: f64, colors: &[Vec<usize>]) {
     let h2 = h * h;
     let pressure_stiffness_factor = 1.0 + world.cfg.k_pressure * world.cfg.bladder_pressure;
     let orientations_quat_ptr = SendPtr(world.orientations.quat.as_mut_ptr());
-    let orientations_inv_inertia_ptr = SendPtr(world.orientations.inv_inertia.as_ptr() as *mut DVec3);
+    let orientations_inv_inertia_ptr =
+        SendPtr(world.orientations.inv_inertia.as_ptr() as *mut DVec3);
     let constraints_ptr = SendPtr(world.bend_twist_constraints.as_mut_ptr());
 
     for color_class in colors {
-        color_class.par_iter().for_each(|&idx| unsafe {
+        for_each_maybe_parallel(color_class, |idx| unsafe {
             let b = &mut *constraints_ptr.add(idx);
             if b.state == ConstraintState::Broken {
                 return;
@@ -1081,8 +1055,10 @@ pub fn solve_bend_twist_constraints_parallel(world: &mut World, h: f64, colors: 
                 let j0 = -0.5 * (r_w * e_k - e_k.cross(r_vec));
                 let j1 = 0.5 * (r_w * e_k + e_k.cross(r_vec));
 
-                let w_rot0 = (j0.x.powi(2) * w_q1.x) + (j0.y.powi(2) * w_q1.y) + (j0.z.powi(2) * w_q1.z);
-                let w_rot1 = (j1.x.powi(2) * w_q2.x) + (j1.y.powi(2) * w_q2.y) + (j1.z.powi(2) * w_q2.z);
+                let w_rot0 =
+                    (j0.x.powi(2) * w_q1.x) + (j0.y.powi(2) * w_q1.y) + (j0.z.powi(2) * w_q1.z);
+                let w_rot1 =
+                    (j1.x.powi(2) * w_q2.x) + (j1.y.powi(2) * w_q2.y) + (j1.z.powi(2) * w_q2.z);
 
                 let alpha_tilde = comp[k] / h2;
                 let denom = w_rot0 + w_rot1 + alpha_tilde;
@@ -1098,29 +1074,31 @@ pub fn solve_bend_twist_constraints_parallel(world: &mut World, h: f64, colors: 
                     j0.y * w_q1.y * delta_lambda,
                     j0.z * w_q1.z * delta_lambda,
                 );
-                *orientations_quat_ptr.add(b.q1_index) =
-                    (*orientations_quat_ptr.add(b.q1_index) * DQuat::from_scaled_axis(delta_theta_local_1)).normalize();
+                *orientations_quat_ptr.add(b.q1_index) = (*orientations_quat_ptr.add(b.q1_index)
+                    * DQuat::from_scaled_axis(delta_theta_local_1))
+                .normalize();
 
                 let delta_theta_local_2 = DVec3::new(
                     j1.x * w_q2.x * delta_lambda,
                     j1.y * w_q2.y * delta_lambda,
                     j1.z * w_q2.z * delta_lambda,
                 );
-                *orientations_quat_ptr.add(b.q2_index) =
-                    (*orientations_quat_ptr.add(b.q2_index) * DQuat::from_scaled_axis(delta_theta_local_2)).normalize();
+                *orientations_quat_ptr.add(b.q2_index) = (*orientations_quat_ptr.add(b.q2_index)
+                    * DQuat::from_scaled_axis(delta_theta_local_2))
+                .normalize();
             }
         });
     }
 }
 
-pub fn solve_dihedral_bending_constraints_parallel(world: &mut World, h: f64, colors: &[Vec<usize>]) {
+fn solve_dihedral_bending_constraints_parallel(world: &mut World, h: f64, colors: &[Vec<usize>]) {
     let h2 = h * h;
     let pred_pos_ptr = SendPtr(world.particles.pred_pos.as_mut_ptr());
     let inv_mass_ptr = SendPtr(world.particles.inv_mass.as_ptr() as *mut f64);
     let constraints_ptr = SendPtr(world.dihedral_bending_constraints.as_mut_ptr());
 
     for color_class in colors {
-        color_class.par_iter().for_each(|&idx| unsafe {
+        for_each_maybe_parallel(color_class, |idx| unsafe {
             let b = &mut *constraints_ptr.add(idx);
             let w1 = *inv_mass_ptr.add(b.p1);
             let w2 = *inv_mass_ptr.add(b.p2);
@@ -1207,14 +1185,14 @@ pub fn solve_dihedral_bending_constraints_parallel(world: &mut World, h: f64, co
     }
 }
 
-pub fn solve_unilateral_constraints_parallel(world: &mut World, h: f64, colors: &[Vec<usize>]) {
+fn solve_unilateral_constraints_parallel(world: &mut World, h: f64, colors: &[Vec<usize>]) {
     let h2 = h * h;
     let pred_pos_ptr = SendPtr(world.particles.pred_pos.as_mut_ptr());
     let inv_mass_ptr = SendPtr(world.particles.inv_mass.as_ptr() as *mut f64);
     let constraints_ptr = SendPtr(world.unilateral_constraints.as_mut_ptr());
 
     for color_class in colors {
-        color_class.par_iter().for_each(|&idx| unsafe {
+        for_each_maybe_parallel(color_class, |idx| unsafe {
             let b = &mut *constraints_ptr.add(idx);
             let w1 = *inv_mass_ptr.add(b.p1);
             let w2 = *inv_mass_ptr.add(b.p2);
@@ -1258,5 +1236,3 @@ pub fn solve_unilateral_constraints_parallel(world: &mut World, h: f64, colors: 
         });
     }
 }
-
-

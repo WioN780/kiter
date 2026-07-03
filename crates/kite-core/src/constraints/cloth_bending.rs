@@ -20,7 +20,14 @@ pub struct DihedralBendingConstraint {
 
 impl DihedralBendingConstraint {
     /// Creates a new DihedralBendingConstraint.
-    pub fn new(p1: usize, p2: usize, p3: usize, p4: usize, rest_angle: f64, compliance: f64) -> Self {
+    pub fn new(
+        p1: usize,
+        p2: usize,
+        p3: usize,
+        p4: usize,
+        rest_angle: f64,
+        compliance: f64,
+    ) -> Self {
         Self {
             p1,
             p2,

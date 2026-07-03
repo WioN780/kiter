@@ -17,20 +17,20 @@ impl Material {
     /// Pultruded Carbon Fiber Rod ballpark values.
     pub fn carbon_fiber() -> Self {
         Self {
-            youngs_modulus: 1.0e11,    // 100 GPa
-            shear_modulus: 4.5e9,     // 4.5 GPa
+            youngs_modulus: 1.0e11, // 100 GPa
+            shear_modulus: 4.5e9,   // 4.5 GPa
             density: 1550.0,
-            tensile_strength: 9.0e8,  // 900 MPa
+            tensile_strength: 9.0e8, // 900 MPa
         }
     }
 
     /// Fiberglass Rod ballpark values.
     pub fn fiberglass() -> Self {
         Self {
-            youngs_modulus: 4.0e10,    // 40 GPa
-            shear_modulus: 4.0e9,     // 4.0 GPa
+            youngs_modulus: 4.0e10, // 40 GPa
+            shear_modulus: 4.0e9,   // 4.0 GPa
             density: 1950.0,
-            tensile_strength: 8.0e8,  // 800 MPa
+            tensile_strength: 8.0e8, // 800 MPa
         }
     }
 }
@@ -48,9 +48,7 @@ impl SectionGeometry {
     /// Computes the cross-sectional area $A$ in $\text{m}^2$.
     pub fn area(&self) -> f64 {
         match *self {
-            SectionGeometry::SolidRound { radius } => {
-                std::f64::consts::PI * radius.powi(2)
-            }
+            SectionGeometry::SolidRound { radius } => std::f64::consts::PI * radius.powi(2),
             SectionGeometry::Tube { radius, thickness } => {
                 let inner_r = radius - thickness;
                 std::f64::consts::PI * (radius.powi(2) - inner_r.powi(2))
@@ -61,9 +59,7 @@ impl SectionGeometry {
     /// Computes the second moment of area $I$ in $\text{m}^4$ (bending).
     pub fn area_moment_of_inertia(&self) -> f64 {
         match *self {
-            SectionGeometry::SolidRound { radius } => {
-                std::f64::consts::PI * radius.powi(4) / 4.0
-            }
+            SectionGeometry::SolidRound { radius } => std::f64::consts::PI * radius.powi(4) / 4.0,
             SectionGeometry::Tube { radius, thickness } => {
                 let inner_r = radius - thickness;
                 std::f64::consts::PI * (radius.powi(4) - inner_r.powi(4)) / 4.0
@@ -74,9 +70,7 @@ impl SectionGeometry {
     /// Computes the polar moment of area $J$ in $\text{m}^4$ (torsion).
     pub fn polar_moment_of_inertia(&self) -> f64 {
         match *self {
-            SectionGeometry::SolidRound { radius } => {
-                std::f64::consts::PI * radius.powi(4) / 2.0
-            }
+            SectionGeometry::SolidRound { radius } => std::f64::consts::PI * radius.powi(4) / 2.0,
             SectionGeometry::Tube { radius, thickness } => {
                 let inner_r = radius - thickness;
                 std::f64::consts::PI * (radius.powi(4) - inner_r.powi(4)) / 2.0
@@ -115,7 +109,11 @@ pub fn stretch_shear_compliance(material: &Material, geom: &SectionGeometry, len
 
 /// Maps material properties and section geometry to bend-twist compliance.
 /// Returns a vector containing (bend_x, bend_y, twist_z) compliances.
-pub fn bend_twist_compliance(material: &Material, geom: &SectionGeometry, average_length: f64) -> DVec3 {
+pub fn bend_twist_compliance(
+    material: &Material,
+    geom: &SectionGeometry,
+    average_length: f64,
+) -> DVec3 {
     let i = geom.area_moment_of_inertia();
     let j = geom.polar_moment_of_inertia();
     let comp_bend = average_length / (4.0 * material.youngs_modulus * i);

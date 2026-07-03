@@ -1,13 +1,15 @@
-pub mod mean_profile;
 pub mod curl_noise;
 pub mod gust_events;
+pub mod mean_profile;
+pub mod thermal_cells;
 
 use glam::DVec3;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
-pub use mean_profile::mean_wind;
 pub use curl_noise::CurlNoiseField;
 pub use gust_events::GustEvent;
+pub use mean_profile::mean_wind;
+pub use thermal_cells::ThermalCell;
 
 /// Configuration for the wind field, including shear, turbulence, and gusts.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -29,6 +31,8 @@ pub struct WindConfig {
     pub octaves: usize,
     /// Active gust events.
     pub gusts: Vec<GustEvent>,
+    /// Active thermal/convective cells (§7.5).
+    pub thermals: Vec<ThermalCell>,
     /// Seed for the turbulence field RNG.
     pub seed: u64,
 }
@@ -44,6 +48,7 @@ impl Default for WindConfig {
             length_scale: 20.0,
             octaves: 3,
             gusts: Vec::new(),
+            thermals: Vec::new(),
             seed: 42,
         }
     }
@@ -53,12 +58,27 @@ impl Default for WindConfig {
 /// Combines the mean shear profile, curl-noise turbulence, and discrete gusts.
 pub fn wind_at(pos: DVec3, t: f64, cfg: &WindConfig) -> DVec3 {
     // 1. Mean profile component
-    let v_mean = mean_wind(pos, t, cfg.v_ref, cfg.h_ref, cfg.shear_exponent, cfg.direction);
+    let v_mean = mean_wind(
+        pos,
+        t,
+        cfg.v_ref,
+        cfg.h_ref,
+        cfg.shear_exponent,
+        cfg.direction,
+    );
 
     // 2. Turbulence component (divergence-free curl-noise)
     let v_turb = if cfg.turbulence_intensity > 0.0 {
         let field = CurlNoiseField::new(cfg.seed, cfg.length_scale, cfg.octaves);
-        field.turbulence_at(pos, t, cfg.v_ref, cfg.h_ref, cfg.shear_exponent, cfg.direction, cfg.turbulence_intensity)
+        field.turbulence_at(
+            pos,
+            t,
+            cfg.v_ref,
+            cfg.h_ref,
+            cfg.shear_exponent,
+            cfg.direction,
+            cfg.turbulence_intensity,
+        )
     } else {
         DVec3::ZERO
     };
@@ -69,5 +89,11 @@ pub fn wind_at(pos: DVec3, t: f64, cfg: &WindConfig) -> DVec3 {
         v_gust += gust.velocity_at(pos, t);
     }
 
-    v_mean + v_turb + v_gust
+    // 4. Thermal/convective cells (§7.5)
+    let mut v_thermal = DVec3::ZERO;
+    for cell in &cfg.thermals {
+        v_thermal += cell.velocity_at(pos, t);
+    }
+
+    v_mean + v_turb + v_gust + v_thermal
 }

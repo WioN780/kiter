@@ -1,12 +1,14 @@
-use glam::{DVec3, DQuat};
-use serde::{Serialize, Deserialize};
-use crate::world::World;
-use crate::constraints::{
-    DistanceConstraint, StretchShearConstraint, BendTwistConstraint,
-    DihedralBendingConstraint, UnilateralDistanceConstraint,
-};
 use crate::aero::CanopyPanel;
-use crate::materials::{stretch_shear_compliance, bend_twist_compliance, Material, SectionGeometry};
+use crate::constraints::{
+    BendTwistConstraint, DihedralBendingConstraint, DistanceConstraint, StretchShearConstraint,
+    UnilateralDistanceConstraint,
+};
+use crate::materials::{
+    bend_twist_compliance, stretch_shear_compliance, Material, SectionGeometry,
+};
+use crate::world::World;
+use glam::{DQuat, DVec3};
+use serde::{Deserialize, Serialize};
 
 /// Definition of a spar (rod) in the kite.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -86,7 +88,9 @@ pub fn build_kite_from_def(world: &mut World, def: &KiteDefinition) {
             density: spar.density,
             tensile_strength: 1.0e9, // large default
         };
-        let geom = SectionGeometry::SolidRound { radius: spar.radius };
+        let geom = SectionGeometry::SolidRound {
+            radius: spar.radius,
+        };
         let cross_area = geom.area();
         let segment_mass = spar.density * cross_area * segment_len;
 
@@ -102,7 +106,7 @@ pub fn build_kite_from_def(world: &mut World, def: &KiteDefinition) {
         // Add orientation segments and stretch-shear constraints
         let mut spar_orientations = Vec::new();
         let u_tangent = delta.normalize();
-        
+
         // Find rest orientation: rotates world Z (local tangent) to spar tangent direction
         let q_rot = if u_tangent.dot(DVec3::NEG_Z).abs() > 0.999 {
             DQuat::from_rotation_y(std::f64::consts::PI)
@@ -116,14 +120,16 @@ pub fn build_kite_from_def(world: &mut World, def: &KiteDefinition) {
             let q_idx = world.add_segment(q_rot, geom.compute_inertia(segment_len, segment_mass));
             spar_orientations.push(q_idx);
 
-            world.stretch_shear_constraints.push(StretchShearConstraint::new(
-                spar_particles[i],
-                spar_particles[i + 1],
-                q_idx,
-                segment_len,
-                comp_ss,
-                2.0 * spar.radius,
-            ));
+            world
+                .stretch_shear_constraints
+                .push(StretchShearConstraint::new(
+                    spar_particles[i],
+                    spar_particles[i + 1],
+                    q_idx,
+                    segment_len,
+                    comp_ss,
+                    2.0 * spar.radius,
+                ));
         }
 
         // Add bend-twist constraints between adjacent segments in this spar
@@ -184,12 +190,9 @@ pub fn build_kite_from_def(world: &mut World, def: &KiteDefinition) {
                 panel_def.shear_compliance // diagonal
             };
 
-            world.distance_constraints.push(DistanceConstraint::new(
-                p_a,
-                p_b,
-                rest_len,
-                comp,
-            ));
+            world
+                .distance_constraints
+                .push(DistanceConstraint::new(p_a, p_b, rest_len, comp));
         };
 
         add_cloth_edge(i1, i2, panel);
@@ -221,8 +224,14 @@ pub fn build_kite_from_def(world: &mut World, def: &KiteDefinition) {
                 let p_shared2 = shared[1];
 
                 // Find unshared opposite vertices
-                let p_opp_i = *set_i.iter().find(|&&x| x != p_shared1 && x != p_shared2).unwrap();
-                let p_opp_j = *set_j.iter().find(|&&x| x != p_shared1 && x != p_shared2).unwrap();
+                let p_opp_i = *set_i
+                    .iter()
+                    .find(|&&x| x != p_shared1 && x != p_shared2)
+                    .unwrap();
+                let p_opp_j = *set_j
+                    .iter()
+                    .find(|&&x| x != p_shared1 && x != p_shared2)
+                    .unwrap();
 
                 // Compute rest dihedral angle
                 let pos1 = world.particles.pos[p_shared1];
@@ -232,20 +241,26 @@ pub fn build_kite_from_def(world: &mut World, def: &KiteDefinition) {
 
                 let rest_angle = crate::world::compute_dihedral_angle(pos1, pos2, pos3, pos4);
 
-                world.dihedral_bending_constraints.push(DihedralBendingConstraint::new(
-                    p_shared1,
-                    p_shared2,
-                    p_opp_i,
-                    p_opp_j,
-                    rest_angle,
-                    p_def.bending_compliance,
-                ));
+                world
+                    .dihedral_bending_constraints
+                    .push(DihedralBendingConstraint::new(
+                        p_shared1,
+                        p_shared2,
+                        p_opp_i,
+                        p_opp_j,
+                        rest_angle,
+                        p_def.bending_compliance,
+                    ));
             }
         }
     }
 
     // 4. Build Bridle Junction and Lines
-    let j_mass = if def.bridle_junction_pinned { 0.0 } else { 0.05 };
+    let j_mass = if def.bridle_junction_pinned {
+        0.0
+    } else {
+        0.05
+    };
     let j_idx = find_or_add_particle(world, def.bridle_junction, j_mass);
 
     for line in &def.bridles {
@@ -257,12 +272,90 @@ pub fn build_kite_from_def(world: &mut World, def: &KiteDefinition) {
             find_or_add_particle(world, line.to, fabric_mass)
         };
 
-        world.unilateral_constraints.push(UnilateralDistanceConstraint::new(
-            from_idx,
-            to_idx,
-            line.rest_length,
-            line.compliance,
-            line.diameter,
-        ));
+        world
+            .unilateral_constraints
+            .push(UnilateralDistanceConstraint::new(
+                from_idx,
+                to_idx,
+                line.rest_length,
+                line.compliance,
+                line.diameter,
+            ));
     }
+}
+
+/// Builds a pinned rectangular cloth grid of `n × n` particles: warp/weft/shear
+/// distance constraints plus dihedral bending across interior weft edges.
+/// Used by benchmarks and the parallel-solver equivalence tests; returns the
+/// index of the first particle added.
+pub fn build_cloth_grid(world: &mut World, n: usize, spacing: f64, mass: f64) -> usize {
+    let first = world.particles.len();
+    let idx = |c: usize, r: usize| first + c + r * n;
+
+    for r in 0..n {
+        for c in 0..n {
+            let pos = DVec3::new(c as f64 * spacing, 0.0, r as f64 * spacing);
+            let m = if r == 0 { 0.0 } else { mass }; // pin the top row
+            world.add_particle(pos, m);
+        }
+    }
+
+    let stretch_compliance = 1e-6;
+    let shear_compliance = 1e-4;
+    let bend_compliance = 1e-2;
+    let diag = spacing * std::f64::consts::SQRT_2;
+
+    for r in 0..n {
+        for c in 0..n {
+            if c + 1 < n {
+                world.distance_constraints.push(DistanceConstraint::new(
+                    idx(c, r),
+                    idx(c + 1, r),
+                    spacing,
+                    stretch_compliance,
+                ));
+            }
+            if r + 1 < n {
+                world.distance_constraints.push(DistanceConstraint::new(
+                    idx(c, r),
+                    idx(c, r + 1),
+                    spacing,
+                    stretch_compliance,
+                ));
+            }
+            if c + 1 < n && r + 1 < n {
+                world.distance_constraints.push(DistanceConstraint::new(
+                    idx(c, r),
+                    idx(c + 1, r + 1),
+                    diag,
+                    shear_compliance,
+                ));
+                world.distance_constraints.push(DistanceConstraint::new(
+                    idx(c + 1, r),
+                    idx(c, r + 1),
+                    diag,
+                    shear_compliance,
+                ));
+            }
+        }
+    }
+
+    // Dihedral bending across each interior weft edge (flat rest angle):
+    // edge (c,r)-(c+1,r) shared by wing particles (c or c+1, r-1) and (c, r+1).
+    for r in 1..n - 1 {
+        for c in 0..n - 1 {
+            world
+                .dihedral_bending_constraints
+                .push(DihedralBendingConstraint::new(
+                    idx(c, r),
+                    idx(c + 1, r),
+                    idx(c, r - 1),
+                    idx(c, r + 1),
+                    0.0,
+                    bend_compliance,
+                ));
+        }
+    }
+
+    first
 }

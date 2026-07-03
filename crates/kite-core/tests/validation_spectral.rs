@@ -45,8 +45,17 @@ fn test_wind_divergence() {
 
         // Divergence check is performed on the turbulence velocity field
         let turb_at = |p: DVec3| {
-            let field = kite_core::wind::CurlNoiseField::new(cfg.seed, cfg.length_scale, cfg.octaves);
-            field.turbulence_at(p, t, cfg.v_ref, cfg.h_ref, cfg.shear_exponent, cfg.direction, cfg.turbulence_intensity)
+            let field =
+                kite_core::wind::CurlNoiseField::new(cfg.seed, cfg.length_scale, cfg.octaves);
+            field.turbulence_at(
+                p,
+                t,
+                cfg.v_ref,
+                cfg.h_ref,
+                cfg.shear_exponent,
+                cfg.direction,
+                cfg.turbulence_intensity,
+            )
         };
 
         let tx_p = turb_at(pos + DVec3::new(delta, 0.0, 0.0));
@@ -61,12 +70,15 @@ fn test_wind_divergence() {
         let div_z = (tz_p.z - tz_m.z) / (2.0 * delta);
 
         let div = div_x + div_y + div_z;
-        
+
         // Assert divergence is near-zero (curl field is divergence-free)
         assert!(
             div.abs() < 1e-4,
             "Divergence of curl-noise at ({}, {}, {}) was {}, expected near-zero",
-            x, y, z, div
+            x,
+            y,
+            z,
+            div
         );
     }
 }
@@ -102,7 +114,10 @@ fn test_wind_spectral_properties() {
     let std_dev = variance.sqrt();
 
     let target_sigma = cfg.turbulence_intensity * 8.0; // 0.15 * 8.0 = 1.2 m/s
-    println!("Measured standard deviation: {}, Target: {}", std_dev, target_sigma);
+    println!(
+        "Measured standard deviation: {}, Target: {}",
+        std_dev, target_sigma
+    );
     // Allowing reasonable statistical variance range for 256 samples
     assert!((std_dev - target_sigma).abs() / target_sigma < 0.35);
 

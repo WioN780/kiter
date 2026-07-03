@@ -1,5 +1,5 @@
-use crate::world::World;
 use crate::aero::coefficients::flat_plate_coefficients;
+use crate::world::World;
 use glam::DVec3;
 
 /// A triangular canopy panel defined by 3 particle indices.
@@ -11,12 +11,20 @@ pub struct CanopyPanel {
     pub p2: usize,
     /// Index of the third particle.
     pub p3: usize,
+    /// Mean vertex velocity after the previous substep's added-mass
+    /// correction (`None` until first sampled). See `aero::unsteady`.
+    pub(crate) prev_mean_vel: Option<DVec3>,
 }
 
 impl CanopyPanel {
     /// Creates a new CanopyPanel.
     pub fn new(p1: usize, p2: usize, p3: usize) -> Self {
-        Self { p1, p2, p3 }
+        Self {
+            p1,
+            p2,
+            p3,
+            prev_mean_vel: None,
+        }
     }
 }
 

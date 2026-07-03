@@ -1,5 +1,5 @@
 use glam::DVec3;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 /// A discrete spatial 1-cosine gust event.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -42,10 +42,10 @@ impl GustEvent {
 
         // Distance the gust front has traveled since start_time
         let d_front = self.propagation_velocity * (t - self.start_time);
-        
+
         // Position along the gust direction
         let x = pos.dot(self.direction);
-        
+
         // Coordinate within the gust front (0 at the front, increasing behind it)
         let xi = d_front - x;
 

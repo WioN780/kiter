@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [main, devel]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  lint:
+    name: fmt + clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo clippy -p kite-core --all-targets --features reference-mode -- -D warnings
+
+  test:
+    name: test (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: default
+            flags: ""
+          - name: reference-mode
+            flags: --features reference-mode
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # Release mode: the kite flight validation test alone takes ~60 s in debug.
+      - run: cargo test -p kite-core --release ${{ matrix.flags }}
+
+  build-cli:
+    name: build kite-cli + scenario smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release -p kite-cli
+      - name: Run a short scenario end-to-end (with rerun .rrd emission)
+        run: |
+          sed 's/^duration = 5.0/duration = 0.5/' scenarios/simple_kite_v1.toml > /tmp/kite_short.toml
+          target/release/kite-cli /tmp/kite_short.toml /tmp/snap.json --rerun=/tmp/viz.rrd
+          test -s /tmp/snap.json
+          test -s /tmp/viz.rrd
+
+  bench-compile:
+    name: benches compile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo bench -p kite-core --no-run

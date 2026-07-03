@@ -1,9 +1,12 @@
-use glam::DVec3;
-use crate::particles::ParticleSet;
-use crate::orientation::OrientationSet;
-use crate::constraints::{DistanceConstraint, BendingConstraint, StretchShearConstraint, BendTwistConstraint, ConstraintState, DihedralBendingConstraint, UnilateralDistanceConstraint};
-use crate::solver;
 use crate::aero::CanopyPanel;
+use crate::constraints::{
+    BendTwistConstraint, BendingConstraint, ConstraintState, DihedralBendingConstraint,
+    DistanceConstraint, StretchShearConstraint, UnilateralDistanceConstraint,
+};
+use crate::orientation::OrientationSet;
+use crate::particles::ParticleSet;
+use crate::solver;
+use glam::DVec3;
 
 /// Event emitted by the physics engine during simulation.
 #[derive(Clone, Debug, PartialEq)]
@@ -36,7 +39,14 @@ pub struct Config {
     /// Whether self-collision detection is enabled.
     pub self_collision_enabled: bool,
     /// Whether to solve constraints in parallel using graph coloring and Rayon.
+    /// Ignored (always serial) when built with the `reference-mode` feature,
+    /// and when the scene is too small for parallelism to pay off (see
+    /// `solver::PARALLEL_CONSTRAINT_THRESHOLD`).
     pub parallel_solve: bool,
+    /// Whether the unsteady added-mass aero correction is applied to canopy
+    /// panels (masterplan §6.4). Off by default: it is a refinement for very
+    /// light / fast-maneuvering kites.
+    pub added_mass_enabled: bool,
 }
 
 impl Default for Config {
@@ -51,7 +61,8 @@ impl Default for Config {
             wind: crate::wind::WindConfig::default(),
             ground_collision_enabled: false,
             self_collision_enabled: false,
-            parallel_solve: std::env::var("KITER_PARALLEL_SOLVE").is_ok(),
+            parallel_solve: !cfg!(feature = "reference-mode"),
+            added_mass_enabled: false,
         }
     }
 }
@@ -86,8 +97,12 @@ pub struct World {
     pub forces: Vec<DVec3>,
     /// Accumulated physics events since the last step.
     pub events: Vec<Event>,
-    /// Cached graph coloring for parallel constraint solving.
-    pub coloring: Option<crate::solver::SolverColoring>,
+    /// Cached graph coloring for the parallel solver, rebuilt automatically
+    /// whenever the constraint counts change (see `SolverColoring::is_stale`).
+    pub(crate) coloring: Option<solver::SolverColoring>,
+    /// Optional rigid control bar coupled at two kinematic anchor particles
+    /// (Milestone 10c, masterplan §5.5).
+    pub control_bar: Option<crate::control_bar::ControlBar>,
 }
 
 /// Helper to compute the dihedral angle between two triangles sharing an edge (p1, p2).
@@ -140,6 +155,7 @@ impl World {
             forces: Vec::new(),
             events: Vec::new(),
             coloring: None,
+            control_bar: None,
         }
     }
 
