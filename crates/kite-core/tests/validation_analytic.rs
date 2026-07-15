@@ -1138,8 +1138,57 @@ fn test_self_collision_folding() {
     assert!(vel_fall.length() < 1.0e-2); // settled, no jitter
 }
 
+#[test]
+fn test_pendulum_period() {
+    let mut world = World::new();
+    world.cfg.substeps = 50;
+    world.cfg.iterations_per_substep = 4;
+    world.cfg.gravity = DVec3::new(0.0, -9.81, 0.0);
+    world.cfg.damping = 0.0; // no damping - period must stay honest, not decay
 
+    let length = 1.0;
+    let small_angle: f64 = 0.05; // rad (~2.9 deg); small-angle error ~0.06%, negligible vs 2% tolerance below
 
+    world.add_particle(DVec3::ZERO, 0.0); // pinned anchor
+    world.add_particle(
+        DVec3::new(length * small_angle.sin(), -length * small_angle.cos(), 0.0),
+        1.0,
+    );
+    world.distance_constraints.push(DistanceConstraint::new(0, 1, length, 1e-10)); // near-rigid
 
+    // Track x(t) of the bob and find successive same-direction zero-crossings
+    let dt = 0.001;
+    let mut prev_x = world.particles.pos[1].x;
+    let mut crossing_times = Vec::new();
+    for _ in 0..20_000 {
+        world.step(dt);
+        let x = world.particles.pos[1].x;
+        if prev_x > 0.0 && x <= 0.0 {
+            crossing_times.push(world.time);
+        }
+        prev_x = x;
+    }
+
+    assert!(
+        crossing_times.len() >= 2,
+        "not enough oscillations captured: {}",
+        crossing_times.len()
+    );
+    let measured_period = crossing_times[1] - crossing_times[0];
+    let expected_period = 2.0 * std::f64::consts::PI * (length / 9.81).sqrt();
+    let ratio = measured_period / expected_period;
+    println!(
+        "Pendulum period: actual={}, expected={}, ratio={}",
+        measured_period, expected_period, ratio
+    );
+
+    assert!(
+        (ratio - 1.0).abs() < 0.02,
+        "Measured period {} not close to small-angle formula {} (ratio {})",
+        measured_period,
+        expected_period,
+        ratio
+    );
+}
 
 

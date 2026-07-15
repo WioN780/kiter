@@ -156,7 +156,6 @@ dependencies = [
  "glam",
  "kite-core",
  "serde",
- "serde_json",
  "toml",
 ]
 
