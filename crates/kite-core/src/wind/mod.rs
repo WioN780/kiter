@@ -52,6 +52,15 @@ impl Default for WindConfig {
 /// Computes the total wind velocity vector at a given position and time.
 /// Combines the mean shear profile, curl-noise turbulence, and discrete gusts.
 pub fn wind_at(pos: DVec3, t: f64, cfg: &WindConfig) -> DVec3 {
+    // A diverged solver can hand back a non-finite position mid-step, before
+    // `World::step` returns and callers get a chance to notice. The Perlin
+    // noise crate `unwrap()`s internally on NaN/Inf input and would hard
+    // panic the process; short-circuit to zero here so divergence surfaces
+    // as the intended "positions went non-finite" state instead of a crash.
+    if !pos.is_finite() {
+        return DVec3::ZERO;
+    }
+
     // 1. Mean profile component
     let v_mean = mean_wind(pos, t, cfg.v_ref, cfg.h_ref, cfg.shear_exponent, cfg.direction);
 
@@ -70,4 +79,21 @@ pub fn wind_at(pos: DVec3, t: f64, cfg: &WindConfig) -> DVec3 {
     }
 
     v_mean + v_turb + v_gust
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn non_finite_position_does_not_panic() {
+        // A diverged solver step can hand this a NaN/Inf position; it must
+        // short-circuit before reaching the Perlin noise sampling, which
+        // panics on non-finite input (see the guard's comment).
+        let cfg = WindConfig { turbulence_intensity: 0.3, ..WindConfig::default() };
+        let v = wind_at(DVec3::new(f64::NAN, 0.0, 0.0), 0.0, &cfg);
+        assert_eq!(v, DVec3::ZERO);
+        let v = wind_at(DVec3::new(f64::INFINITY, 0.0, 0.0), 0.0, &cfg);
+        assert_eq!(v, DVec3::ZERO);
+    }
 }

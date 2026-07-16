@@ -1074,9 +1074,13 @@ fn test_simple_kite_v1_flight() {
     // Assert attitude is aligned downwind (Z-direction)
     assert!((attitude_vector.z - (-1.0)).abs() < 0.05);
 
-    // Assert bit-exact/near-exact regression check against golden snapshot
-    // Final attitude from CLI: DVec3(8.9976e-7, 0.000996, -0.9999995)
-    let expected_attitude = DVec3::new(0.00000089976, 0.00099609, -0.9999995);
+    // Assert bit-exact/near-exact regression check against golden snapshot.
+    // Golden value updated: fabric mass model changed from a flat 0.02 kg/vertex to
+    // physical area * areal_density (mesh-resolution-independent), which shifts canopy
+    // mass distribution and therefore the settled attitude slightly. Direction and bounds
+    // (asserted above) are unchanged; only this exact regression snapshot moved.
+    // New attitude from this test run: DVec3(1.2589e-6, 0.0011894, -0.9999993)
+    let expected_attitude = DVec3::new(0.0000012589, 0.0011894, -0.9999993);
     assert!((attitude_vector - expected_attitude).length() < 1e-4);
 }
 

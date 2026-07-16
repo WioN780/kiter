@@ -20,12 +20,27 @@ impl CanopyPanel {
     }
 }
 
+/// Per-panel aerodynamic readback (lift, drag force and angle of attack) recorded during
+/// `apply_canopy_aerodynamics` for debug visualization. Not used by the solver itself.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct PanelAero {
+    /// Lift force applied to this panel (world frame, Newtons).
+    pub lift: DVec3,
+    /// Drag force applied to this panel (world frame, Newtons).
+    pub drag: DVec3,
+    /// Angle of attack (radians).
+    pub alpha: f64,
+}
+
 /// Computes panel-method aerodynamic forces for all canopy panels (triangles)
 /// and applies them as velocity updates to their vertices.
 pub fn apply_canopy_aerodynamics(world: &mut World, h: f64) {
     let rho = 1.225; // standard air density kg/m^3
 
-    for panel in &world.canopy_panels {
+    world.aero_readback.clear();
+    world.aero_readback.resize(world.canopy_panels.len(), PanelAero::default());
+
+    for (panel_idx, panel) in world.canopy_panels.iter().enumerate() {
         let p1 = world.particles.pos[panel.p1];
         let p2 = world.particles.pos[panel.p2];
         let p3 = world.particles.pos[panel.p3];
@@ -79,6 +94,8 @@ pub fn apply_canopy_aerodynamics(world: &mut World, h: f64) {
         } else {
             DVec3::ZERO
         };
+
+        world.aero_readback[panel_idx] = PanelAero { lift: f_lift, drag: f_drag, alpha };
 
         let f_total = f_lift + f_drag;
 

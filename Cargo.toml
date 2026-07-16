@@ -3,4 +3,5 @@ resolver = "2"
 members = [
     "crates/kite-core",
     "crates/kite-cli",
+    "crates/kite-viz",
 ]

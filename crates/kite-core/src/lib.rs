@@ -21,5 +21,5 @@ pub use constraints::{
 pub use materials::{
     Material, SectionGeometry, stretch_shear_compliance, bend_twist_compliance,
 };
-pub use aero::CanopyPanel;
-pub use geometry::{KiteDefinition, SparDef, PanelDef, BridleLineDef, build_kite_from_def};
+pub use aero::{CanopyPanel, PanelAero};
+pub use geometry::{KiteDefinition, SparDef, PanelDef, BridleLineDef, StiffJunctionDef, build_kite_from_def};

@@ -3,7 +3,7 @@ use crate::particles::ParticleSet;
 use crate::orientation::OrientationSet;
 use crate::constraints::{DistanceConstraint, BendingConstraint, StretchShearConstraint, BendTwistConstraint, ConstraintState, DihedralBendingConstraint, UnilateralDistanceConstraint};
 use crate::solver;
-use crate::aero::CanopyPanel;
+use crate::aero::{CanopyPanel, PanelAero};
 
 /// Event emitted by the physics engine during simulation.
 #[derive(Clone, Debug, PartialEq)]
@@ -80,6 +80,16 @@ pub struct World {
     pub unilateral_constraints: Vec<UnilateralDistanceConstraint>,
     /// Canopy panels (triangles) for aerodynamics.
     pub canopy_panels: Vec<CanopyPanel>,
+    /// Per-panel aerodynamic readback (lift, drag, alpha) from the last substep of the last
+    /// `step()` call. Indexed in parallel with `canopy_panels`. For visualization only.
+    pub aero_readback: Vec<PanelAero>,
+    /// Duration of the last XPBD substep (`dt / substeps`) from the last `step()` call.
+    ///
+    /// XPBD force readback is `lambda / h^2`; after `step()`, each constraint's `lambda`
+    /// holds the value from its LAST substep only (lambda resets every substep) — this is
+    /// an end-of-step snapshot, adequate for visualization but not a substep-accurate force
+    /// history. Consumers must treat `last_h == 0.0` as "no step yet, force = 0".
+    pub last_h: f64,
     /// External torques applied to each segment (world frame).
     pub torques: Vec<DVec3>,
     /// External forces applied to each particle.
@@ -136,6 +146,8 @@ impl World {
             dihedral_bending_constraints: Vec::new(),
             unilateral_constraints: Vec::new(),
             canopy_panels: Vec::new(),
+            aero_readback: Vec::new(),
+            last_h: 0.0,
             torques: Vec::new(),
             forces: Vec::new(),
             events: Vec::new(),
@@ -157,6 +169,7 @@ impl World {
 
     /// Advances the simulation by a time step `dt` using the XPBD solver.
     pub fn step(&mut self, dt: f64) {
+        self.last_h = dt / self.cfg.substeps as f64;
         solver::step_simulation(self, dt);
         self.time += dt;
     }
