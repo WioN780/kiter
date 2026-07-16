@@ -8,3 +8,5 @@ kite-core = { path = "../kite-core" }
 serde = { version = "1.0", features = ["derive"] }
 toml = "0.8"
 glam = "0.24"
+serde_json = "1.0"
+rerun = "0.15"

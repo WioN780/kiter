@@ -33,7 +33,14 @@ pub struct StretchShearConstraint {
 
 impl StretchShearConstraint {
     /// Creates a new StretchShearConstraint.
-    pub fn new(p1: usize, p2: usize, q_index: usize, rest_length: f64, compliance: DVec3, diameter: f64) -> Self {
+    pub fn new(
+        p1: usize,
+        p2: usize,
+        q_index: usize,
+        rest_length: f64,
+        compliance: DVec3,
+        diameter: f64,
+    ) -> Self {
         Self {
             p1,
             p2,

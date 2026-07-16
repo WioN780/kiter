@@ -1,8 +1,8 @@
+use crate::world::World;
 use glam::DVec3;
 use parry3d_f64::math::Point;
 use parry3d_f64::query::PointQuery;
 use parry3d_f64::shape::Triangle;
-use crate::world::World;
 
 /// A point-vs-triangle self-collision contact constraint.
 #[derive(Clone, Debug)]
@@ -13,7 +13,7 @@ pub struct ContactConstraint {
     pub p_c: usize,
     pub normal: DVec3, // points from triangle towards particle i
     pub depth: f64,
-    pub u: f64,        // barycentric coordinates
+    pub u: f64, // barycentric coordinates
     pub v: f64,
     pub w: f64,
     pub lambda: f64,
@@ -33,7 +33,9 @@ pub fn detect_self_collisions(world: &World) -> Vec<ContactConstraint> {
             return true;
         }
         for c in &world.distance_constraints {
-            if (c.p1 == p_i && tri_vertices.contains(&c.p2)) || (c.p2 == p_i && tri_vertices.contains(&c.p1)) {
+            if (c.p1 == p_i && tri_vertices.contains(&c.p2))
+                || (c.p2 == p_i && tri_vertices.contains(&c.p1))
+            {
                 return true;
             }
         }

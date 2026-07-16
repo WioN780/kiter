@@ -1,16 +1,16 @@
-pub mod rod_cosserat;
-pub mod cloth_stretch_shear;
-pub mod cloth_bending;
-pub mod bridle_unilateral;
 pub mod anchor;
+pub mod bridle_unilateral;
+pub mod cloth_bending;
+pub mod cloth_stretch_shear;
 pub mod ground_contact;
+pub mod rod_cosserat;
 pub mod self_collision;
 
 use glam::DVec3;
 
-pub use rod_cosserat::{StretchShearConstraint, BendTwistConstraint, ConstraintState};
-pub use cloth_bending::DihedralBendingConstraint;
 pub use bridle_unilateral::UnilateralDistanceConstraint;
+pub use cloth_bending::DihedralBendingConstraint;
+pub use rod_cosserat::{BendTwistConstraint, ConstraintState, StretchShearConstraint};
 
 /// A position-based compliant distance constraint between two particles.
 #[derive(Clone, Debug)]

@@ -9,12 +9,22 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 noise = "0.8"
 parry3d-f64 = "0.15"
+# Milestone 8+/10c: collision detection + truly rigid accessories ONLY
+# (masterplan §5.5 / rule 10) — never the dynamics solver for rods/cloth/lines.
+rapier3d-f64 = "0.20"
 rayon = "1.8"
 
 [dev-dependencies]
 approx = "0.5"
 toml = "0.8"
+criterion = "0.5"
 
 [features]
 default = []
+# Forces the solver to the single-threaded reference path regardless of
+# Config::parallel_solve — bit-exact serial baseline for regression tests.
 reference-mode = []
+
+[[bench]]
+name = "solver_bench"
+harness = false
