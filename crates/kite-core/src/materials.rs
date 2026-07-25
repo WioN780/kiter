@@ -96,6 +96,17 @@ impl SectionGeometry {
         let i_xy = (1.0 / 12.0) * mass * length.powi(2) + 0.25 * mass * r.powi(2);
         DVec3::new(i_xy, i_xy, i_z)
     }
+
+    /// Diagonal *inverse* inertia ($I_x^{-1}, I_y^{-1}, I_z^{-1}$) of a segment — the
+    /// generalized rotational inverse mass the XPBD solver expects in
+    /// `OrientationSet::inv_inertia`. A zero/degenerate principal moment maps to a
+    /// zero inverse (rotationally pinned about that axis), matching how the solver
+    /// reads `inv_inertia == 0` as "infinitely heavy".
+    pub fn compute_inv_inertia(&self, length: f64, mass: f64) -> DVec3 {
+        let i = self.compute_inertia(length, mass);
+        let inv = |x: f64| if x > 0.0 { 1.0 / x } else { 0.0 };
+        DVec3::new(inv(i.x), inv(i.y), inv(i.z))
+    }
 }
 
 /// Maps material properties and section geometry to stretch-shear compliance.
@@ -103,6 +114,9 @@ impl SectionGeometry {
 pub fn stretch_shear_compliance(material: &Material, geom: &SectionGeometry, length: f64) -> DVec3 {
     let a = geom.area();
     let comp_stretch = length / (material.youngs_modulus * a);
+    // Deliberate simplification: omits the Timoshenko shear shape factor kappa
+    // (~0.9 solid round, ~0.5 thin tube), so shear reads up to ~2x too stiff.
+    // Add kappa to SectionGeometry if shear-dominated deflection ever matters.
     let comp_shear = length / (material.shear_modulus * a);
     DVec3::new(comp_shear, comp_shear, comp_stretch)
 }

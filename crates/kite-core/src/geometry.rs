@@ -85,6 +85,16 @@ pub struct StiffJunctionDef {
     pub compliance: f64,
 }
 
+/// Ties two different spars together at a point (like a zip-tie/lashing): a stiff
+/// distance constraint between the nearest node of each spar, holding their as-built
+/// separation. Position-only (free pivot) — use `stiff_junctions` on a welded node for
+/// full bend-twist locking.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct LashingDef {
+    pub point: DVec3,
+    pub compliance: f64,
+}
+
 /// A complete parametric/structural definition of a kite.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct KiteDefinition {
@@ -102,6 +112,10 @@ pub struct KiteDefinition {
     /// at a welded particle (e.g. a T-joint cross-strut), holding their as-built angle.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub stiff_junctions: Vec<StiffJunctionDef>,
+    /// Lashings tying two different spars together at a point with a stiff distance
+    /// constraint (position-only, free pivot).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub lashings: Vec<LashingDef>,
 }
 
 /// Geometry importer pipeline: builds all particles and constraints in the World
@@ -167,7 +181,12 @@ pub fn build_kite_from_def(world: &mut World, def: &KiteDefinition) {
         let comp_ss = stretch_shear_compliance(&mat, &geom, segment_len);
 
         for i in 0..spar.num_segments {
-            let q_idx = world.add_segment(q_rot, geom.compute_inertia(segment_len, segment_mass));
+            // `add_segment` takes the *inverse* inertia (generalized rotational inverse
+            // mass); passing the inertia itself makes every rod frame ~I^-2 times too
+            // heavy to rotate, which welds each spar segment's director frame to its
+            // as-built world orientation and freezes the whole kite's attitude.
+            let q_idx =
+                world.add_segment(q_rot, geom.compute_inv_inertia(segment_len, segment_mass));
             spar_orientations.push(q_idx);
 
             world
@@ -250,6 +269,62 @@ pub fn build_kite_from_def(world: &mut World, def: &KiteDefinition) {
                 ));
             }
         }
+    }
+
+    // 1.6 Build spar-to-spar lashings: a stiff distance constraint between the nearest
+    // node of each of two different spars, holding their as-built separation
+    // (position-only tie/free pivot — unlike stiff_junctions, which also locks
+    // bend/twist and requires the two spars to already share a welded particle).
+    for lashing in &def.lashings {
+        // For each spar with a node within 0.25m of `point`, keep only its closest node.
+        let mut best_per_spar: HashMap<usize, (usize, f64)> = HashMap::new();
+        for (&p_idx, touching) in &particle_segments {
+            let dist = (world.particles.pos[p_idx] - lashing.point).length();
+            if dist > 0.25 {
+                continue;
+            }
+            for &(spar_id, _) in touching {
+                let entry = best_per_spar.entry(spar_id).or_insert((p_idx, dist));
+                if dist < entry.1 || (dist == entry.1 && p_idx < entry.0) {
+                    *entry = (p_idx, dist);
+                }
+            }
+        }
+
+        // Pick the two closest-to-point spars (each already reduced to its closest node);
+        // sort with explicit tie-breaks for determinism (AGENTS.md rule 6), since
+        // particle_segments iteration order is a HashMap and not stable.
+        let mut candidates: Vec<(usize, usize, f64)> = best_per_spar
+            .iter()
+            .map(|(&spar_id, &(p_idx, dist))| (spar_id, p_idx, dist))
+            .collect();
+        candidates.sort_unstable_by(|a, b| {
+            a.2.total_cmp(&b.2).then_with(|| a.0.cmp(&b.0)).then_with(|| a.1.cmp(&b.1))
+        });
+
+        if candidates.len() < 2 {
+            // Declarative like stiff_junctions: not a hard error, but shouldn't happen for
+            // a well-formed scenario.
+            debug_assert!(
+                false,
+                "lashing point {:?} found nodes from fewer than two spars within 0.25m",
+                lashing.point
+            );
+            continue;
+        }
+
+        let p_a = candidates[0].1;
+        let p_b = candidates[1].1;
+        if p_a == p_b {
+            continue; // already welded to the same particle — nothing to lash
+        }
+
+        // Rule 3 (AGENTS.md): compliance is never literally 0.0 in a division.
+        let comp = lashing.compliance.max(1e-12);
+        let as_built_dist = (world.particles.pos[p_a] - world.particles.pos[p_b]).length();
+        world
+            .distance_constraints
+            .push(DistanceConstraint::new(p_a, p_b, as_built_dist, comp));
     }
 
     // 2. Build Canopy Panels and Cloth Constraints
@@ -420,7 +495,76 @@ pub fn build_kite_from_def(world: &mut World, def: &KiteDefinition) {
     };
     let j_idx = find_or_add_particle(world, def.bridle_junction, j_mass);
 
-    for line in &def.bridles {
+    // Bridle-to-bridle knots: a bridle's `from`/`to` may coincide with an interior node
+    // of ANOTHER bridle line rather than a spar/panel/junction point. Interior nodes only
+    // exist once that other bridle has actually been built (its chain particles created),
+    // so build order matters — unlike every other weld in this format, which is
+    // order-independent because both sides compute the same coordinate. Resolve a build
+    // order here so this works regardless of `def.bridles` listing order.
+    //
+    // Precompute each bridle's prospective interior-node positions purely from the def
+    // (straight-line k/n interpolation — identical math to the chain-building loop below).
+    let n_bridles = def.bridles.len();
+    let bridle_interior_positions: Vec<Vec<DVec3>> = def
+        .bridles
+        .iter()
+        .map(|line| {
+            let n_seg = line.num_segments.max(1);
+            (1..n_seg)
+                .map(|k| {
+                    let t = k as f64 / n_seg as f64;
+                    line.from + (line.to - line.from) * t
+                })
+                .collect()
+        })
+        .collect();
+
+    // Bridle i depends on bridle j (i != j) if i's `from` or `to` lands on one of j's
+    // interior nodes, i.e. i must be built after j.
+    let mut deps: Vec<Vec<usize>> = vec![Vec::new(); n_bridles];
+    for (i, dep_i) in deps.iter_mut().enumerate() {
+        let bridle_i = &def.bridles[i];
+        for (j, interior_j) in bridle_interior_positions.iter().enumerate() {
+            if i == j {
+                continue;
+            }
+            let attaches = interior_j.iter().any(|&node| {
+                (bridle_i.from - node).length() < weld_tol
+                    || (bridle_i.to - node).length() < weld_tol
+            });
+            if attaches {
+                dep_i.push(j);
+            }
+        }
+    }
+
+    // Deferred-rounds scheduling: repeatedly build any bridle whose dependencies are
+    // already built, until a pass makes no progress. A knot cycle (degenerate, but must
+    // not hang or panic) leaves some bridles unbuilt — append those in def order to break
+    // the cycle deterministically.
+    let mut built = vec![false; n_bridles];
+    let mut build_order: Vec<usize> = Vec::with_capacity(n_bridles);
+    loop {
+        let mut progressed = false;
+        for i in 0..n_bridles {
+            if !built[i] && deps[i].iter().all(|&d| built[d]) {
+                built[i] = true;
+                build_order.push(i);
+                progressed = true;
+            }
+        }
+        if !progressed {
+            break;
+        }
+    }
+    for (i, &b) in built.iter().enumerate() {
+        if !b {
+            build_order.push(i);
+        }
+    }
+
+    for &bridle_idx in &build_order {
+        let line = &def.bridles[bridle_idx];
         // Find closest particles to "from" and "to"
         let from_idx = find_or_add_particle(world, line.from, bridle_anchor_mass);
         let to_idx = if (line.to - def.bridle_junction).length() < weld_tol {
