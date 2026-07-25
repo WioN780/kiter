@@ -1079,6 +1079,155 @@ fn test_canopy_panel_aerodynamics() {
     }
 }
 
+/// Validates the sail-referenced chordwise load distribution in
+/// `apply_canopy_aerodynamics` against an independent analytic value.
+///
+/// A sail's pitching moment comes from how its pressure load varies along the
+/// chord. Two ways of getting that wrong have both been in this file's history:
+/// splitting each panel's force equally over its 3 vertices puts the resultant at
+/// the panel's area centroid, which for a flat panel gives *identically zero*
+/// pitching moment about that panel; and offsetting each panel's application point
+/// to a CoP derived from that panel's own chordwise extent is not mesh-convergent
+/// (the offset scales with the sub-triangle, and up/down-pointing triangles of a
+/// subdivided mesh carry opposing offsets that cancel incoherently).
+///
+/// The implementation instead scales each panel's load by
+/// `w(xi) = (p+1)(1-xi)^p` at that panel's station `xi` along the *sail* chord,
+/// renormalized area-weighted. For a RECTANGULAR plate the area is distributed
+/// uniformly in `xi`, so the load centroid must land on the continuum value
+/// `\int xi w dxi = 1/(p+2) = x_bar` — an analytic target this test can check
+/// without re-implementing the code's own arithmetic. The test asserts:
+///
+///   1. the redistribution leaves the total resultant exactly unchanged;
+///   2. the resultant's line of action passes through `x_bar` of the chord;
+///   3. the error shrinks under mesh refinement (it is a quadrature error).
+#[test]
+fn test_canopy_chordwise_load_distribution() {
+    use kite_core::CanopyPanel;
+
+    // Flat plate in the XZ plane (normal along Y), chord `c` along +Z, span `b`
+    // along X, meshed into `n` chordwise strips of 2 triangles each.
+    let b = 1.0;
+    let c = 2.0;
+    let wind_speed = 10.0;
+    let alpha_w: f64 = 25.0_f64.to_radians();
+
+    // Returns (total force, chordwise station of the line of action).
+    let run = |n: usize| -> (DVec3, f64) {
+        let mut world = World::new();
+        world.cfg.substeps = 1;
+        world.cfg.gravity = DVec3::ZERO;
+        world.cfg.damping = 0.0;
+        world.cfg.wind.v_ref = wind_speed;
+        // Tilt the wind out of the plate's plane to set the incidence.
+        world.cfg.wind.direction = DVec3::new(0.0, alpha_w.sin(), alpha_w.cos());
+        world.cfg.wind.shear_exponent = 0.0;
+
+        // Grid of (n+1) x 2 vertices.
+        let vid = |j: usize, side: usize| j * 2 + side;
+        for j in 0..=n {
+            let z = c * (j as f64) / (n as f64);
+            world.add_particle(DVec3::new(0.0, 0.0, z), 1.0);
+            world.add_particle(DVec3::new(b, 0.0, z), 1.0);
+        }
+        for j in 0..n {
+            // Consistent winding so every panel normal points the same way.
+            world
+                .canopy_panels
+                .push(CanopyPanel::new(vid(j, 0), vid(j, 1), vid(j + 1, 0)));
+            world
+                .canopy_panels
+                .push(CanopyPanel::new(vid(j, 1), vid(j + 1, 1), vid(j + 1, 0)));
+        }
+
+        let positions: Vec<DVec3> = world.particles.pos.clone();
+        let dt = 1.0e-4;
+        world.step(dt);
+
+        // mass = 1 and substeps = 1, so F_i = vel_i / dt.
+        let forces: Vec<DVec3> = world.particles.vel.iter().map(|v| *v / dt).collect();
+        let f_total: DVec3 = forces.iter().copied().sum();
+
+        // Moment about the plate's area centroid, then the point on the
+        // resultant's line of action closest to it: with M = d x F and F.d = 0,
+        // F x M = |F|^2 d.
+        let centroid = DVec3::new(0.5 * b, 0.0, 0.5 * c);
+        let moment: DVec3 = positions
+            .iter()
+            .zip(&forces)
+            .map(|(p, f)| (*p - centroid).cross(*f))
+            .sum();
+        let d = f_total.cross(moment) / f_total.length_squared();
+        (f_total, (centroid + d).z)
+    };
+
+    // --- Analytic resultant: flat-plate coefficients over the whole plate.
+    let area = b * c;
+    let normal = DVec3::Y;
+    let v_rel = DVec3::new(0.0, alpha_w.sin(), alpha_w.cos()) * wind_speed;
+    let v_rel_unit = v_rel.normalize();
+    let sin_alpha = v_rel_unit.dot(normal);
+    let alpha = sin_alpha.asin();
+    let q = 0.5 * 1.225 * wind_speed * wind_speed;
+    let cn = 1.1 * (2.0 * alpha).sin();
+    let cl = cn * alpha.cos();
+    let cd = cn * alpha.sin() + 0.04;
+    let f_expected =
+        q * area * cd * v_rel_unit + q * area * cl * (normal - sin_alpha * v_rel_unit).normalize();
+
+    // --- Analytic center of pressure: the loading law's own continuum centroid.
+    // x_bar = 0.25 at small |alpha| (thin-airfoil flat-plate quarter chord) rising
+    // to 0.5 (uniform pressure) at 90 deg; p = 1/x_bar - 2 makes w's centroid
+    // 1/(p+2) = x_bar, and for a rectangle the discrete sum converges to it.
+    let x_bar = 0.25 + 0.25 * (1.0 - alpha.cos());
+    let cop_expected = x_bar * c;
+
+    let mut errors = Vec::new();
+    for &n in &[4usize, 16, 64] {
+        let (f_total, cop_z) = run(n);
+
+        let force_rel_err = (f_total - f_expected).length() / f_expected.length();
+        assert!(
+            force_rel_err < 1e-9,
+            "n={n}: chordwise redistribution must leave the resultant unchanged: \
+             got {f_total:?}, expected {f_expected:?} (rel err {force_rel_err})"
+        );
+
+        let err = (cop_z - cop_expected).abs();
+        println!(
+            "n={n}: CoP at {:.4} m of {c} m chord ({:.2}% chord), analytic {:.4} ({:.2}%), err {:.5}",
+            cop_z,
+            100.0 * cop_z / c,
+            cop_expected,
+            100.0 * x_bar,
+            err
+        );
+        errors.push(err);
+    }
+
+    // The load must sit ahead of mid-chord: a uniform-pressure split would put it
+    // exactly at 0.5 c, which is the bug this guards against.
+    let (_, cop_coarse) = run(16);
+    assert!(
+        cop_coarse < 0.45 * c,
+        "load centre must sit clearly ahead of mid-chord, got {:.2}% chord",
+        100.0 * cop_coarse / c
+    );
+
+    // Quadrature error, so it must fall under refinement and converge on the
+    // analytic value.
+    assert!(
+        errors[1] < errors[0] && errors[2] < errors[1],
+        "CoP error must decrease under mesh refinement, got {errors:?}"
+    );
+    assert!(
+        errors[2] < 0.01 * c,
+        "at 128 panels the CoP should be within 1% of chord of the analytic value, \
+         error was {:.5} m",
+        errors[2]
+    );
+}
+
 #[test]
 fn test_spar_drag() {
     use kite_core::StretchShearConstraint;
@@ -1148,15 +1297,32 @@ fn test_simple_kite_v1_flight() {
     let kite_def = scenario.kite.unwrap();
     build_kite_from_def(&mut world, &kite_def);
 
-    // Step simulation
+    // Track the spine's direction over the whole flight, not just at the end.
+    let p_nose = 4; // spine node at z = -0.75, where the Nose-line attaches
+    let p_tail = 0; // spine node at z = +0.75
+    let build_attitude = (world.particles.pos[p_nose] - world.particles.pos[p_tail]).normalize();
+
+    // Step simulation, recording how far the kite's attitude gets from its build
+    // orientation and how fast it is rotating.
     let dt = 0.01;
     let steps = (scenario.duration / dt).round() as usize;
+    let mut max_attitude_change_deg: f64 = 0.0;
+    let mut max_seg_omega: f64 = 0.0;
     for _ in 0..steps {
         world.step(dt);
+        let a = (world.particles.pos[p_nose] - world.particles.pos[p_tail]).normalize();
+        let change = a.dot(build_attitude).clamp(-1.0, 1.0).acos().to_degrees();
+        max_attitude_change_deg = max_attitude_change_deg.max(change);
+        max_seg_omega = max_seg_omega.max(
+            world
+                .orientations
+                .omega
+                .iter()
+                .map(|o| o.length())
+                .fold(0.0, f64::max),
+        );
     }
 
-    let p_nose = 4;
-    let p_tail = 0;
     let final_nose = world.particles.pos[p_nose];
     let final_tail = world.particles.pos[p_tail];
     let attitude_vector = (final_nose - final_tail).normalize();
@@ -1164,23 +1330,58 @@ fn test_simple_kite_v1_flight() {
     println!("TEST KITE final nose: {:?}", final_nose);
     println!("TEST KITE final tail: {:?}", final_tail);
     println!("TEST KITE final attitude: {:?}", attitude_vector);
+    println!(
+        "TEST KITE max attitude change: {:.2} deg, max segment |omega|: {:.4} rad/s",
+        max_attitude_change_deg, max_seg_omega
+    );
 
-    // Assert stable bounded positions (no NaNs or infinite drift)
-    assert!(!final_nose.x.is_nan());
-    assert!(final_nose.y > -2.0 && final_nose.y < -1.0);
-    assert!(final_nose.z > -1.5 && final_nose.z < -0.5);
+    // No divergence anywhere in the structure.
+    for (i, p) in world.particles.pos.iter().enumerate() {
+        assert!(p.is_finite(), "particle {i} went non-finite: {p:?}");
+    }
 
-    // Assert attitude is aligned downwind (Z-direction)
-    assert!((attitude_vector.z - (-1.0)).abs() < 0.05);
+    // Geometric containment. The tow point is pinned and every kite node hangs off
+    // it through tension-only bridle legs, so no node can ever be further from the
+    // tow point than (longest leg + the spine's own length). This is a hard
+    // consequence of the constraint graph, not a fitted bound.
+    let tow = kite_def.bridle_junction;
+    let longest_leg = kite_def
+        .bridles
+        .iter()
+        .map(|b| b.rest_length)
+        .fold(0.0, f64::max);
+    let spine_len = (kite_def.spars[0].end - kite_def.spars[0].start).length();
+    let reach = longest_leg + spine_len;
+    for (i, p) in world.particles.pos.iter().enumerate() {
+        assert!(
+            (*p - tow).length() < reach * 1.05,
+            "particle {i} at {p:?} escaped the bridle's reach ({reach:.3} m) from the tow point"
+        );
+    }
 
-    // Assert bit-exact/near-exact regression check against golden snapshot.
-    // Golden value updated: fabric mass model changed from a flat 0.02 kg/vertex to
-    // physical area * areal_density (mesh-resolution-independent), which shifts canopy
-    // mass distribution and therefore the settled attitude slightly. Direction and bounds
-    // (asserted above) are unchanged; only this exact regression snapshot moved.
-    // New attitude from this test run: DVec3(1.2589e-6, 0.0011894, -0.9999993)
-    let expected_attitude = DVec3::new(0.0000012589, 0.0011894, -0.9999993);
-    assert!((attitude_vector - expected_attitude).length() < 1e-4);
+    // The kite MUST change attitude. It is built flat: the sail lies in the
+    // horizontal plane, presenting zero incidence to the horizontal wind, so it
+    // develops no lift in its build pose and can only fly by rotating to a lifting
+    // attitude. This is the regression guard for the frozen-attitude bug, where
+    // `build_kite_from_def` passed the segment inertia to `World::add_segment` in
+    // place of its inverse. That made every rod frame ~I^-2 times too heavy to
+    // rotate, so the stretch-shear constraint held each spar's tangent aligned with
+    // a director frame welded to its as-built world orientation, and the kite's
+    // attitude could not respond to any aerodynamic or bridle moment. The golden
+    // value this test used to assert was an attitude of
+    // (1.26e-6, 1.19e-3, -0.9999993), i.e. 0.07 deg from the build direction after
+    // five seconds of flight.
+    assert!(
+        max_attitude_change_deg > 10.0,
+        "kite attitude barely moved from its build orientation ({max_attitude_change_deg:.3} deg) \
+         - it is built flat and cannot fly without rotating, so this means rotational \
+         dynamics are inert"
+    );
+    assert!(
+        max_seg_omega > 0.05,
+        "rod segment frames never rotated (max |omega| = {max_seg_omega:.5} rad/s); the Cosserat \
+         directors are not tracking the structure"
+    );
 }
 
 #[test]

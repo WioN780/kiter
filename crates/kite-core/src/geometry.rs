@@ -158,12 +158,38 @@ pub fn build_kite_from_def(world: &mut World, def: &KiteDefinition) {
         let cross_area = geom.area();
         let segment_mass = spar.density * cross_area * segment_len;
 
-        // Create particles along the spar
+        // Create particles along the spar.
+        //
+        // Lumped-mass discretization: a segment's mass is split half to each of
+        // its two end nodes, so interior nodes carry a full segment mass and the
+        // two tips carry half. The nodal masses then sum to exactly the spar's
+        // mass (density * area * length) and the mass distribution is symmetric
+        // about the spar's midpoint. Giving every one of the n+1 nodes a full
+        // segment mass instead overstates the spar by (n+1)/n — 25% at n = 4,
+        // 50% at n = 2 — and doubles the weighting of the tips, which inflates
+        // the kite's moment of inertia about its own centre of mass and so
+        // wrongly slows every rotational response.
+        //
+        // Welded intersections (e.g. a cross-strut crossing the spine) accumulate
+        // a share from each spar that meets there rather than keeping only the
+        // first spar's, which is what `find_or_add_particle` would do.
         let mut spar_particles = Vec::new();
         for i in 0..=spar.num_segments {
             let p_pos = spar.start + delta * (i as f64);
-            // Welds intersections automatically (e.g. cross-strut intersection)
-            let idx = find_or_add_particle(world, p_pos, segment_mass);
+            let share = if i == 0 || i == spar.num_segments {
+                0.5 * segment_mass
+            } else {
+                segment_mass
+            };
+            let existing =
+                (0..world.particles.len()).find(|&j| (world.particles.pos[j] - p_pos).length() < weld_tol);
+            let idx = match existing {
+                Some(j) => {
+                    add_particle_mass(world, j, share);
+                    j
+                }
+                None => world.add_particle(p_pos, share),
+            };
             spar_particles.push(idx);
         }
 

@@ -1,0 +1,126 @@
+﻿# Free-flying bridled diamond kite on a ground-anchored tether.
+#
+# Sail geometry is the reference `simple_kite_v1.toml` diamond: 1.5 m spine
+# (nose -> tail), 2.0 m cross-strut welded at mid-spine, the same 12-triangle
+# tessellation (here at subdivisions = 2, so 48 aero panels). The whole assembly
+# is rotated 20 deg about the span axis so the sail sits at 20 deg incidence to
+# the horizontal wind, then translated so the bridle tow point starts on a 20 m
+# tether at 45 deg elevation. Rotating the assembly as a rigid body leaves every
+# internal distance untouched, so the sail and bridle geometry carry over exactly.
+#
+# BRIDLE TRIM is derived, not guessed. Measured for this sail at 20 deg incidence
+# in 8 m/s wind: mass 0.6110 kg, mass centre at 50.0% chord, aerodynamic centre of
+# pressure at 37.0% chord, resultant 54.1 N. The CoP sitting 13% of chord AHEAD of
+# the mass centre makes the bare sail pitch-divergent (+10.6 N.m nose-up about its
+# own CoM), so the bridle has to supply the restoring moment.
+#
+# Trim needs zero net moment about the tow point (the tether acts there and so
+# contributes none). In sail coordinates (spine along z, nose at z = -0.75, sail in
+# the y = 0 plane, tow point at (0, -d, z_J)):
+#
+#     d*F_f - (z_cp - z_J)*F_N + m*g*(d*sin(a) - z_J*cos(a)) = 0
+#
+# With sail-normal load F_N = 54.03 N, in-plane friction F_f = 3.06 N, z_cp =
+# -0.1956 m, m*g = 5.994 N, a = 20 deg and d = 0.8 m, this gives z_J = -0.3028 m:
+# 29.8% of chord aft of the nose, 0.8 m below the sail. That sits just ahead of the
+# CoP, so the aero moment about the tow point is nose-down and cancels the nose-up
+# moment of the weight. Linearizing gives dM/da ~ -19 N.m/rad, i.e. the trim is
+# statically stable in pitch.
+#
+# BRIDLE LAYOUT is nose + tail down the spine, plus a leg to each wingtip. The
+# spine pair carries pitch: solving junction equilibrium against the 45 deg tether
+# direction gives 0.48 T (nose) and 0.81 T (tail) with the tips unloaded, so both
+# spine legs are genuinely in tension. A nose + two-tips bridle cannot hold this
+# tow point at all: the nose leg solves to a NEGATIVE tension there, i.e. it would
+# have to push, so a tension-only line goes slack and the kite keeps no pitch
+# restraint. The tip legs carry lateral/roll load. Rest lengths are the exact
+# as-built leg distances, so the bridle starts taut.
+#
+# BOW (dihedral). A FLAT diamond is laterally unstable, and the engine predicts
+# exactly that: flat and correctly trimmed, this kite climbs cleanly to its
+# equilibrium elevation and holds it, then the two wingtip bridle tensions begin to
+# diverge (9.7/13.1 N at t = 4.0 s, 11.6/32.6 N at t = 5.0 s), it rolls off and
+# comes down. The standard real fix is a bow: the cross-strut is bent so the tips
+# sit toward the suction side, giving dihedral, which converts sideslip into a
+# restoring rolling moment. Here the tips are set 0.175 m out of the sail plane over
+# a 1.0 m half-span, i.e. 10 deg dihedral (typical for a bowed diamond/Eddy kite).
+# The two bowed halves are separate spars, so a `stiff_junctions` entry at the spine
+# locks them and the spine to each other at their as-built angles: physically the
+# taped cross joint. Without it the bow would be a free hinge.
+#
+# TAIL. A tail is included as well, modelled as what it physically is: a slender
+# chain with mass and cross-flow drag, free at its downstream end. 4.5 m long (3x the sail
+# height, standard practice for a diamond). The engine's line aero is cylinder
+# cross-flow drag, so a 5 cm-wide ribbon is represented by diameter = 0.05 m (a
+# ribbon and a cylinder of the same width have comparable cross-flow C_D ~ 1.2 at
+# this Reynolds number) with density = 1.27 kg/m^3 chosen so the modelled line mass
+# equals that of a real 5 cm x 4.5 m ribbon of 0.05 kg/m^2 fabric (0.011 kg). The
+# tail is aligned with the chord at build, and the engine's line drag is purely
+# cross-flow, so it adds no steady load and does not disturb the trim above; it
+# only reacts when the kite rotates away from it.
+#
+# The 10 deg bow moves the kite's mass centre ~0.04 m out of the sail plane, which
+# shifts the weight's moment arm about the tow point by ~0.08 N.m: well inside the
+# linearized trim tolerance above, so z_J is unchanged.
+
+name = "Free-flying diamond kite"
+gravity = [0.0, -9.81, 0.0]
+duration = 30.0
+
+[wind]
+v_ref = 8.0
+h_ref = 10.0
+shear_exponent = 0.15
+direction = [0.0, 0.0, 1.0]
+turbulence_intensity = 0.10
+length_scale = 20.0
+octaves = 3
+seed = 42
+
+[sim]
+damping = 0.15
+ground_collision_enabled = true
+
+[kite]
+name = "Free-flying diamond kite"
+bridle_junction = [0.000000, 14.142136, 14.142136]
+bridle_junction_pinned = false
+pinned_points = [[0.0, 0.0, 0.0]]
+
+spars = [
+    { name = "Spine", start = [0.000000, 15.046841, 13.995501], end = [0.000000, 14.533811, 15.405040], num_segments = 4, radius = 0.005, youngs_modulus = 4.0e10, shear_modulus = 4.0e9, density = 1950.0 },
+    { name = "Cross-L", start = [-1.000000, 14.954772, 14.760124], end = [0.000000, 14.790326, 14.700271], num_segments = 2, radius = 0.005, youngs_modulus = 4.0e10, shear_modulus = 4.0e9, density = 1950.0 },
+    { name = "Cross-R", start = [0.000000, 14.790326, 14.700271], end = [1.000000, 14.954772, 14.760124], num_segments = 2, radius = 0.005, youngs_modulus = 4.0e10, shear_modulus = 4.0e9, density = 1950.0 }
+]
+
+# The taped cross joint: locks the two bowed cross-spar halves, and the spine, to
+# each other at their as-built relative angles, so the bow is a stiff elastic joint
+# instead of a free hinge at the spine.
+stiff_junctions = [
+    { point = [0.000000, 14.790326, 14.700271], compliance = 1.0e-3 }
+]
+
+panels = [
+    { name = "TL1", p1 = [0.000000, 15.046841, 13.995501], p2 = [-0.500000, 14.872549, 14.730197], p3 = [0.000000, 14.918584, 14.347886], warp_compliance = 1.0e-4, weft_compliance = 1.0e-4, shear_compliance = 2.0e-4, bending_compliance = 0.1, subdivisions = 2, areal_density = 0.05 },
+    { name = "TL2", p1 = [0.000000, 15.046841, 13.995501], p2 = [-1.000000, 14.954772, 14.760124], p3 = [-0.500000, 14.872549, 14.730197], warp_compliance = 1.0e-4, weft_compliance = 1.0e-4, shear_compliance = 2.0e-4, bending_compliance = 0.1, subdivisions = 2, areal_density = 0.05 },
+    { name = "TL3", p1 = [0.000000, 14.918584, 14.347886], p2 = [-0.500000, 14.872549, 14.730197], p3 = [0.000000, 14.790326, 14.700271], warp_compliance = 1.0e-4, weft_compliance = 1.0e-4, shear_compliance = 2.0e-4, bending_compliance = 0.1, subdivisions = 2, areal_density = 0.05 },
+    { name = "TR1", p1 = [0.000000, 15.046841, 13.995501], p2 = [0.000000, 14.918584, 14.347886], p3 = [0.500000, 14.872549, 14.730197], warp_compliance = 1.0e-4, weft_compliance = 1.0e-4, shear_compliance = 2.0e-4, bending_compliance = 0.1, subdivisions = 2, areal_density = 0.05 },
+    { name = "TR2", p1 = [0.000000, 15.046841, 13.995501], p2 = [0.500000, 14.872549, 14.730197], p3 = [1.000000, 14.954772, 14.760124], warp_compliance = 1.0e-4, weft_compliance = 1.0e-4, shear_compliance = 2.0e-4, bending_compliance = 0.1, subdivisions = 2, areal_density = 0.05 },
+    { name = "TR3", p1 = [0.000000, 14.918584, 14.347886], p2 = [0.000000, 14.790326, 14.700271], p3 = [0.500000, 14.872549, 14.730197], warp_compliance = 1.0e-4, weft_compliance = 1.0e-4, shear_compliance = 2.0e-4, bending_compliance = 0.1, subdivisions = 2, areal_density = 0.05 },
+    { name = "BL1", p1 = [0.000000, 14.533811, 15.405040], p2 = [0.000000, 14.662068, 15.052655], p3 = [-0.500000, 14.872549, 14.730197], warp_compliance = 1.0e-4, weft_compliance = 1.0e-4, shear_compliance = 2.0e-4, bending_compliance = 0.1, subdivisions = 2, areal_density = 0.05 },
+    { name = "BL2", p1 = [0.000000, 14.533811, 15.405040], p2 = [-0.500000, 14.872549, 14.730197], p3 = [-1.000000, 14.954772, 14.760124], warp_compliance = 1.0e-4, weft_compliance = 1.0e-4, shear_compliance = 2.0e-4, bending_compliance = 0.1, subdivisions = 2, areal_density = 0.05 },
+    { name = "BL3", p1 = [0.000000, 14.662068, 15.052655], p2 = [0.000000, 14.790326, 14.700271], p3 = [-0.500000, 14.872549, 14.730197], warp_compliance = 1.0e-4, weft_compliance = 1.0e-4, shear_compliance = 2.0e-4, bending_compliance = 0.1, subdivisions = 2, areal_density = 0.05 },
+    { name = "BR1", p1 = [0.000000, 14.533811, 15.405040], p2 = [0.500000, 14.872549, 14.730197], p3 = [0.000000, 14.662068, 15.052655], warp_compliance = 1.0e-4, weft_compliance = 1.0e-4, shear_compliance = 2.0e-4, bending_compliance = 0.1, subdivisions = 2, areal_density = 0.05 },
+    { name = "BR2", p1 = [0.000000, 14.533811, 15.405040], p2 = [1.000000, 14.954772, 14.760124], p3 = [0.500000, 14.872549, 14.730197], warp_compliance = 1.0e-4, weft_compliance = 1.0e-4, shear_compliance = 2.0e-4, bending_compliance = 0.1, subdivisions = 2, areal_density = 0.05 },
+    { name = "BR3", p1 = [0.000000, 14.662068, 15.052655], p2 = [0.500000, 14.872549, 14.730197], p3 = [0.000000, 14.790326, 14.700271], warp_compliance = 1.0e-4, weft_compliance = 1.0e-4, shear_compliance = 2.0e-4, bending_compliance = 0.1, subdivisions = 2, areal_density = 0.05 }
+]
+
+bridles = [
+    { name = "Nose-line",  from = [0.000000, 15.046841, 13.995501],  to = [0.000000, 14.142136, 14.142136], rest_length = 0.916509, compliance = 1.0e-6, diameter = 0.002 },
+    { name = "Tail-line",  from = [0.000000, 14.533811, 15.405040],  to = [0.000000, 14.142136, 14.142136], rest_length = 1.322266, compliance = 1.0e-6, diameter = 0.002 },
+    { name = "Left-line",  from = [-1.000000, 14.954772, 14.760124], to = [0.000000, 14.142136, 14.142136], rest_length = 1.429165, compliance = 1.0e-6, diameter = 0.002 },
+    { name = "Right-line", from = [1.000000, 14.954772, 14.760124],  to = [0.000000, 14.142136, 14.142136], rest_length = 1.429165, compliance = 1.0e-6, diameter = 0.002 },
+    { name = "Tether",     from = [0.000000, 14.142136, 14.142136],  to = [0.0, 0.0, 0.0], rest_length = 20.0, compliance = 1.0e-6, diameter = 0.002, num_segments = 16 },
+    { name = "Tail-streamer", from = [0.000000, 14.533811, 15.405040], to = [0.000000, 12.994720, 19.633657], rest_length = 4.5, compliance = 1.0e-5, diameter = 0.05, num_segments = 9, density = 1.27 }
+]
+
