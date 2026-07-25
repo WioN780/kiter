@@ -1,0 +1,57 @@
+# NOTE: this kite does not fly, and the reason is a bridle-geometry error in the
+# scenario, not an engine problem. Its tow point sits at 14.7% of chord aft of the
+# nose, and solving junction equilibrium against the tether direction at the flight
+# elevation gives leg tensions of -1.30 T (nose) and +1.33 T (each tip). The nose
+# leg's tension is NEGATIVE: it would have to push. A tension-only bridle line
+# cannot, so the nose leg is permanently slack and the bridle degenerates to the two
+# tip legs, which attach on the span axis and therefore have almost no moment arm
+# about it. The kite is left with no pitch restraint at all, feathers to near-zero
+# incidence, loses lift and sinks.
+#
+# Kept as a diagnostic case: it is exactly the failure the frozen-attitude bug used
+# to hide, because welded rod frames held the kite's attitude rigid and no bridle
+# leg had to carry a pitching moment for it to appear to fly. For a scenario whose
+# bridle trim is derived rather than assumed, see diamond_kite_freeflight.toml.
+
+name = "Flying Kite (dynamic)"
+gravity = [0.0, -9.81, 0.0]
+duration = 20.0
+
+[wind]
+v_ref = 7.0
+h_ref = 10.0
+shear_exponent = 0.15
+direction = [0.0, 0.0, 1.0]
+turbulence_intensity = 0.18
+length_scale = 5.0
+octaves = 3
+seed = 7
+
+[sim]
+damping = 0.15
+
+[kite]
+name = "Flying Kite (dynamic)"
+bridle_junction = [0.0000, 11.0437, 13.9748]
+bridle_junction_pinned = false
+pinned_points = [[0.0000, 0.0000, 0.0000]]
+
+spars = [
+    { name = "Spine", start = [0.0000, 12.3170, 14.3203], end = [0.0000, 11.6830, 15.6797], num_segments = 4, radius = 0.004, youngs_modulus = 4.0e10, shear_modulus = 4.0e9, density = 1600.0 },
+    { name = "Cross-L", start = [-1.0000, 12.2672, 14.7108], end = [0.0000, 12.1585, 14.6601], num_segments = 2, radius = 0.004, youngs_modulus = 4.0e10, shear_modulus = 4.0e9, density = 1600.0 },
+    { name = "Cross-R", start = [0.0000, 12.1585, 14.6601], end = [1.0000, 12.2672, 14.7108], num_segments = 2, radius = 0.004, youngs_modulus = 4.0e10, shear_modulus = 4.0e9, density = 1600.0 }
+]
+
+panels = [
+    { name = "NL", p1 = [0.0000, 12.3170, 14.3203], p2 = [-1.0000, 12.2672, 14.7108], p3 = [0.0000, 12.1585, 14.6601], warp_compliance = 1.0e-4, weft_compliance = 1.0e-4, shear_compliance = 2.0e-4, bending_compliance = 0.1, subdivisions = 2, areal_density = 0.05 },
+    { name = "NR", p1 = [0.0000, 12.3170, 14.3203], p2 = [0.0000, 12.1585, 14.6601], p3 = [1.0000, 12.2672, 14.7108], warp_compliance = 1.0e-4, weft_compliance = 1.0e-4, shear_compliance = 2.0e-4, bending_compliance = 0.1, subdivisions = 2, areal_density = 0.05 },
+    { name = "TL", p1 = [0.0000, 12.1585, 14.6601], p2 = [-1.0000, 12.2672, 14.7108], p3 = [0.0000, 11.6830, 15.6797], warp_compliance = 1.0e-4, weft_compliance = 1.0e-4, shear_compliance = 2.0e-4, bending_compliance = 0.1, subdivisions = 2, areal_density = 0.05 },
+    { name = "TR", p1 = [0.0000, 12.1585, 14.6601], p2 = [0.0000, 11.6830, 15.6797], p3 = [1.0000, 12.2672, 14.7108], warp_compliance = 1.0e-4, weft_compliance = 1.0e-4, shear_compliance = 2.0e-4, bending_compliance = 0.1, subdivisions = 2, areal_density = 0.05 }
+]
+
+bridles = [
+    { name = "Nose-line", from = [0.0000, 12.3170, 14.3203], to = [0.0000, 11.0437, 13.9748], rest_length = 1.3193, compliance = 1.0e-6, diameter = 0.0015 },
+    { name = "Left-line", from = [-1.0000, 12.2672, 14.7108], to = [0.0000, 11.0437, 13.9748], rest_length = 1.7432, compliance = 1.0e-6, diameter = 0.0015 },
+    { name = "Right-line", from = [1.0000, 12.2672, 14.7108], to = [0.0000, 11.0437, 13.9748], rest_length = 1.7432, compliance = 1.0e-6, diameter = 0.0015 },
+    { name = "Tether", from = [0.0000, 11.0437, 13.9748], to = [0.0000, 0.0000, 0.0000], rest_length = 17.7227, compliance = 1.0e-6, diameter = 0.002, num_segments = 12 }
+]

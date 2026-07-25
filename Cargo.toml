@@ -5,3 +5,12 @@ members = [
     "crates/kite-cli",
     "crates/kite-viz",
 ]
+
+# Debug builds are unusably slow for the f64 XPBD solver (24 substeps/step);
+# optimize the engine and all dependencies while keeping the tool crates
+# themselves fast to recompile.
+[profile.dev.package.kite-core]
+opt-level = 3
+
+[profile.dev.package."*"]
+opt-level = 2

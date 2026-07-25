@@ -331,6 +331,10 @@ fn structural_hash(doc: &EditorDoc) -> u64 {
         sj.point.hash(&mut h);
         hash_f64(&mut h, sj.compliance);
     }
+    for la in &doc.lashings {
+        la.point.hash(&mut h);
+        hash_f64(&mut h, la.compliance);
+    }
     doc.junction.hash(&mut h);
     doc.junction_pinned.hash(&mut h);
     let mut pinned: Vec<usize> = doc.pinned.iter().copied().collect();

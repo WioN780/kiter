@@ -189,7 +189,12 @@ impl ControlBar {
 
         let tips = [self.tip_local(true), self.tip_local(false)];
         let body = &mut self.bodies[self.bar_handle];
+        // add_force_at_point accumulates into BOTH user_force and user_torque;
+        // rapier clears neither on step, and reset_forces only clears the force
+        // half. Without reset_torques every substep's line torque piles up
+        // forever and the bar spins to hundreds of rad/s within a minute.
         body.reset_forces(true);
+        body.reset_torques(true);
         for (slot, tip) in tips.iter().enumerate() {
             if force[slot] != DVec3::ZERO {
                 let p = body.position() * tip;

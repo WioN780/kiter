@@ -19,10 +19,15 @@ pub struct ContactConstraint {
     pub lambda: f64,
 }
 
+/// Contact thickness (m) shared by self-collision detection and the contact
+/// solve — must stay a single constant so the detection margin and the solved
+/// separation cannot drift apart.
+const CONTACT_THICKNESS: f64 = 0.01;
+
 /// Detects all active self-collisions (point-vs-triangle) between non-adjacent particles/canopy panels.
 pub fn detect_self_collisions(world: &World) -> Vec<ContactConstraint> {
     let mut contacts = Vec::new();
-    let thickness = 0.01; // 1cm contact thickness
+    let thickness = CONTACT_THICKNESS;
 
     let n_particles = world.particles.len();
     let n_panels = world.canopy_panels.len();
@@ -153,7 +158,7 @@ pub fn solve_contact_constraints(world: &mut World, contacts: &mut [ContactConst
         let pos_c = world.particles.pred_pos[b.p_c];
 
         let p_closest = b.u * pos_a + b.v * pos_b + b.w * pos_c;
-        let constraint_val = (pos_i - p_closest).dot(b.normal) - 0.01; // thickness = 0.01m
+        let constraint_val = (pos_i - p_closest).dot(b.normal) - CONTACT_THICKNESS;
 
         // Active only when penetrating
         if constraint_val >= 0.0 && b.lambda <= 0.0 {

@@ -40,18 +40,26 @@ impl GustEvent {
             return DVec3::ZERO;
         }
 
+        // `new()` normalizes direction, but scenario TOML deserializes the pub
+        // fields directly and bypasses it; a non-unit direction would silently
+        // scale both the projected position and the output velocity.
+        let dir = self.direction.normalize_or_zero();
+        if dir == DVec3::ZERO {
+            return DVec3::ZERO;
+        }
+
         // Distance the gust front has traveled since start_time
         let d_front = self.propagation_velocity * (t - self.start_time);
 
         // Position along the gust direction
-        let x = pos.dot(self.direction);
+        let x = pos.dot(dir);
 
         // Coordinate within the gust front (0 at the front, increasing behind it)
         let xi = d_front - x;
 
         if xi >= 0.0 && xi <= self.length {
             let factor = 0.5 * (1.0 - (2.0 * std::f64::consts::PI * xi / self.length).cos());
-            (self.amplitude * factor) * self.direction
+            (self.amplitude * factor) * dir
         } else {
             DVec3::ZERO
         }

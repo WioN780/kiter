@@ -13,6 +13,7 @@ fn empty_kite_def(name: &str) -> KiteDefinition {
         bridle_junction_pinned: false,
         pinned_points: Vec::new(),
         stiff_junctions: Vec::new(),
+        lashings: Vec::new(),
     }
 }
 

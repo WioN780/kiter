@@ -237,6 +237,13 @@ fn selected_editor(ui: &mut egui::Ui, doc: &mut EditorDoc, sel: &mut SelectionSe
             if let Some(sj) = doc.stiff_joints.iter_mut().find(|sj| sj.point == i) {
                 row_f64(ui, "Joint compliance", &mut sj.compliance, 1.0e-10);
             }
+            let mut lashed = doc.lashings.iter().any(|la| la.point == i);
+            if ui.checkbox(&mut lashed, "Lashing").changed() {
+                doc.toggle_lashing(i);
+            }
+            if let Some(la) = doc.lashings.iter_mut().find(|la| la.point == i) {
+                row_f64(ui, "Lashing compliance", &mut la.compliance, 1.0e-10);
+            }
         }
         Selection::Spar(i) if i < doc.spars.len() => {
             ui.heading("Spar");

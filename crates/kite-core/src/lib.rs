@@ -17,7 +17,10 @@ pub use constraints::{
     BendTwistConstraint, BendingConstraint, ConstraintState, DihedralBendingConstraint,
     DistanceConstraint, StretchShearConstraint, UnilateralDistanceConstraint,
 };
-pub use geometry::{build_kite_from_def, BridleLineDef, KiteDefinition, PanelDef, SparDef};
+pub use geometry::{
+    build_kite_from_def, BridleLineDef, KiteDefinition, LashingDef, PanelDef, SparDef,
+    StiffJunctionDef,
+};
 pub use materials::{bend_twist_compliance, stretch_shear_compliance, Material, SectionGeometry};
 pub use orientation::OrientationSet;
 pub use particles::ParticleSet;

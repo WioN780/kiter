@@ -14,6 +14,21 @@ struct Scenario {
     duration: f64,
     wind: Option<WindConfig>,
     kite: Option<KiteDefinition>,
+    sim: Option<SimOverrides>,
+}
+
+/// Optional `[sim]` table: per-scenario overrides of engine `Config` fields.
+/// Mirrors kite-viz's schema so the same file runs identically in both tools.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct SimOverrides {
+    substeps: Option<usize>,
+    iterations_per_substep: Option<usize>,
+    damping: Option<f64>,
+    bladder_pressure: Option<f64>,
+    k_pressure: Option<f64>,
+    ground_collision_enabled: Option<bool>,
+    self_collision_enabled: Option<bool>,
 }
 
 #[derive(Debug, Serialize)]
@@ -117,6 +132,31 @@ fn main() {
     // Initialize World
     let mut world = World::new();
     world.cfg.gravity = scenario.gravity;
+
+    if let Some(sim) = &scenario.sim {
+        if let Some(v) = sim.substeps {
+            world.cfg.substeps = v;
+        }
+        if let Some(v) = sim.iterations_per_substep {
+            world.cfg.iterations_per_substep = v;
+        }
+        if let Some(v) = sim.damping {
+            world.cfg.damping = v;
+        }
+        if let Some(v) = sim.bladder_pressure {
+            world.cfg.bladder_pressure = v;
+        }
+        if let Some(v) = sim.k_pressure {
+            world.cfg.k_pressure = v;
+        }
+        if let Some(v) = sim.ground_collision_enabled {
+            world.cfg.ground_collision_enabled = v;
+        }
+        if let Some(v) = sim.self_collision_enabled {
+            world.cfg.self_collision_enabled = v;
+        }
+        println!("Applied [sim] overrides: {:?}", sim);
+    }
 
     if let Some(wind_cfg) = &scenario.wind {
         world.cfg.wind = wind_cfg.clone();

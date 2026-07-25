@@ -5,11 +5,24 @@ pub mod thermal_cells;
 
 use glam::DVec3;
 use serde::{Deserialize, Serialize};
+use std::cell::RefCell;
 
 pub use curl_noise::CurlNoiseField;
 pub use gust_events::GustEvent;
 pub use mean_profile::mean_wind;
 pub use thermal_cells::ThermalCell;
+
+thread_local! {
+    // `CurlNoiseField::new` rebuilds 3 Perlin permutation tables, and
+    // `wind_at` is called from hot loops (per canopy panel / bridle segment /
+    // spar segment / substep). The field is fully determined by
+    // (seed, length_scale, octaves), so cache the last-built one per thread
+    // instead of reconstructing it every call. This is a pure memoization of
+    // a deterministic function of `cfg` — it changes no observable output and
+    // introduces no cross-call state dependence, so it preserves `World::step`
+    // determinism/purity despite the thread-local storage.
+    static FIELD_CACHE: RefCell<Option<(u64, usize, CurlNoiseField)>> = const { RefCell::new(None) };
+}
 
 /// Configuration for the wind field, including shear, turbulence, and gusts.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -78,16 +91,34 @@ pub fn wind_at(pos: DVec3, t: f64, cfg: &WindConfig) -> DVec3 {
 
     // 2. Turbulence component (divergence-free curl-noise)
     let v_turb = if cfg.turbulence_intensity > 0.0 {
-        let field = CurlNoiseField::new(cfg.seed, cfg.length_scale, cfg.octaves);
-        field.turbulence_at(
-            pos,
-            t,
-            cfg.v_ref,
-            cfg.h_ref,
-            cfg.shear_exponent,
-            cfg.direction,
-            cfg.turbulence_intensity,
-        )
+        FIELD_CACHE.with(|cache| {
+            let mut cache = cache.borrow_mut();
+            let stale = match &*cache {
+                Some((seed, octaves, field)) => {
+                    *seed != cfg.seed
+                        || *octaves != cfg.octaves
+                        || field.length_scale.to_bits() != cfg.length_scale.to_bits()
+                }
+                None => true,
+            };
+            if stale {
+                *cache = Some((
+                    cfg.seed,
+                    cfg.octaves,
+                    CurlNoiseField::new(cfg.seed, cfg.length_scale, cfg.octaves),
+                ));
+            }
+            let (_, _, field) = cache.as_ref().expect("just populated above");
+            field.turbulence_at(
+                pos,
+                t,
+                cfg.v_ref,
+                cfg.h_ref,
+                cfg.shear_exponent,
+                cfg.direction,
+                cfg.turbulence_intensity,
+            )
+        })
     } else {
         DVec3::ZERO
     };

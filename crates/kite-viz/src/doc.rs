@@ -13,7 +13,7 @@ use std::collections::HashSet;
 
 use glam::DVec3;
 use kite_core::wind::{GustEvent, WindConfig};
-use kite_core::{BridleLineDef, KiteDefinition, PanelDef, SparDef, StiffJunctionDef};
+use kite_core::{BridleLineDef, KiteDefinition, LashingDef, PanelDef, SparDef, StiffJunctionDef};
 use serde::{Deserialize, Serialize};
 
 /// 1mm weld tolerance, matching kite-core's `build_kite_from_def`.
@@ -120,6 +120,16 @@ pub struct StiffJointItem {
     pub compliance: f64,
 }
 
+/// A spar-to-spar lashing (zip-tie) at a point index: a stiff distance
+/// constraint between the nearest node of each of two different spars,
+/// position-only (free pivot) — unlike `StiffJointItem`, which also locks
+/// bend/twist and requires a shared welded node.
+#[derive(Debug, Clone)]
+pub struct LashingItem {
+    pub point: usize,
+    pub compliance: f64,
+}
+
 pub struct EditorDoc {
     pub name: String,
     pub gravity: DVec3,
@@ -134,6 +144,7 @@ pub struct EditorDoc {
     pub junction_pinned: bool,
     pub pinned: HashSet<usize>,
     pub stiff_joints: Vec<StiffJointItem>,
+    pub lashings: Vec<LashingItem>,
 }
 
 impl Default for EditorDoc {
@@ -152,6 +163,7 @@ impl Default for EditorDoc {
             junction_pinned: false,
             pinned: HashSet::new(),
             stiff_joints: Vec::new(),
+            lashings: Vec::new(),
         }
     }
 }
@@ -177,6 +189,7 @@ impl EditorDoc {
         let mut junction_pinned = false;
         let mut pinned = HashSet::new();
         let mut stiff_joints = Vec::new();
+        let mut lashings = Vec::new();
 
         if let Some(kite) = &s.kite {
             for sp in &kite.spars {
@@ -235,6 +248,12 @@ impl EditorDoc {
                     compliance: sj.compliance,
                 });
             }
+            for la in &kite.lashings {
+                lashings.push(LashingItem {
+                    point: weld(&mut points, la.point),
+                    compliance: la.compliance,
+                });
+            }
         }
 
         Self {
@@ -251,6 +270,7 @@ impl EditorDoc {
             junction_pinned,
             pinned,
             stiff_joints,
+            lashings,
         }
     }
 
@@ -304,6 +324,11 @@ impl EditorDoc {
             .iter()
             .map(|sj| StiffJunctionDef { point: self.points[sj.point], compliance: sj.compliance })
             .collect();
+        let lashings = self
+            .lashings
+            .iter()
+            .map(|la| LashingDef { point: self.points[la.point], compliance: la.compliance })
+            .collect();
         let bridle_junction = self.junction.map(|i| self.points[i]).unwrap_or(DVec3::ZERO);
         let mut pinned_points: Vec<DVec3> = self.pinned.iter().map(|&i| self.points[i]).collect();
         // Stable order so save output doesn't jitter between hash-set iterations.
@@ -320,6 +345,7 @@ impl EditorDoc {
             bridle_junction_pinned: self.junction_pinned,
             pinned_points,
             stiff_junctions,
+            lashings,
         });
 
         Scenario {
@@ -404,6 +430,17 @@ impl EditorDoc {
         }
     }
 
+    /// Toggles a lashing at point `idx`: adds one with the default
+    /// compliance if absent, removes it if present.
+    pub fn toggle_lashing(&mut self, idx: usize) {
+        match self.lashings.iter().position(|la| la.point == idx) {
+            Some(pos) => {
+                self.lashings.remove(pos);
+            }
+            None => self.lashings.push(LashingItem { point: idx, compliance: 1.0e-9 }),
+        }
+    }
+
     /// Counts of spars/panels/bridles that reference `idx`, for the delete
     /// confirmation prompt.
     pub fn dependents_of_point(&self, idx: usize) -> (usize, usize, usize) {
@@ -428,6 +465,7 @@ impl EditorDoc {
         }
         self.pinned.remove(&idx);
         self.stiff_joints.retain(|sj| sj.point != idx);
+        self.lashings.retain(|la| la.point != idx);
         self.points.remove(idx);
 
         let shift = |i: &mut usize| {
@@ -454,6 +492,9 @@ impl EditorDoc {
         self.pinned = self.pinned.iter().map(|&i| if i > idx { i - 1 } else { i }).collect();
         for sj in &mut self.stiff_joints {
             shift(&mut sj.point);
+        }
+        for la in &mut self.lashings {
+            shift(&mut la.point);
         }
     }
 
@@ -562,6 +603,8 @@ mod tests {
         doc.bridles[bi].density = 1200.0;
         doc.toggle_stiff_joint(p0);
         doc.stiff_joints[0].compliance = 5.0e-8;
+        doc.toggle_lashing(p1);
+        doc.lashings[0].compliance = 3.0e-7;
 
         let toml_str = toml::to_string_pretty(&doc.to_scenario()).expect("serialize");
         let reparsed: Scenario = toml::from_str(&toml_str).expect("reparse");
@@ -574,6 +617,9 @@ mod tests {
         assert_eq!(doc2.stiff_joints.len(), 1);
         assert_eq!(doc2.stiff_joints[0].compliance, 5.0e-8);
         assert!((doc2.points[doc2.stiff_joints[0].point] - doc.points[p0]).length() < WELD_TOL);
+        assert_eq!(doc2.lashings.len(), 1);
+        assert_eq!(doc2.lashings[0].compliance, 3.0e-7);
+        assert!((doc2.points[doc2.lashings[0].point] - doc.points[p1]).length() < WELD_TOL);
     }
 
     #[test]

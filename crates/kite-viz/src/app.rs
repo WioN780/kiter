@@ -211,7 +211,7 @@ impl App {
         if ui.memory(|m| m.focused()).is_some() {
             return;
         }
-        let (esc, q, p, s, f, b, j, n, k, del) = ui.input(|i| {
+        let (esc, q, p, s, f, b, j, n, k, l, del) = ui.input(|i| {
             (
                 i.key_pressed(egui::Key::Escape),
                 i.key_pressed(egui::Key::Q),
@@ -222,6 +222,7 @@ impl App {
                 i.key_pressed(egui::Key::J),
                 i.key_pressed(egui::Key::N),
                 i.key_pressed(egui::Key::K),
+                i.key_pressed(egui::Key::L),
                 i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::X),
             )
         });
@@ -257,6 +258,9 @@ impl App {
         }
         if k {
             self.tool_state.set_tool(Tool::StiffJoint);
+        }
+        if l {
+            self.tool_state.set_tool(Tool::Lashing);
         }
         if del {
             self.try_delete_selected();
@@ -309,6 +313,9 @@ fn build_scene(doc: &EditorDoc, sel: &SelectionSet, tool_state: &ToolState, view
         }
         if doc.stiff_joints.iter().any(|sj| sj.point == i) {
             color = [0.7, 0.2, 0.9, 1.0];
+        }
+        if doc.lashings.iter().any(|la| la.point == i) {
+            color = [1.0, 0.55, 0.0, 1.0];
         }
         if tool_state.pending.contains(&i) {
             color = [0.95, 0.95, 0.2, 1.0];
@@ -660,6 +667,7 @@ impl eframe::App for App {
                     self.tool_button(ui, Tool::Junction, "Junction", "J");
                     self.tool_button(ui, Tool::Pin, "Pin", "N");
                     self.tool_button(ui, Tool::StiffJoint, "Stiff Joint", "K");
+                    self.tool_button(ui, Tool::Lashing, "Lashing", "L");
                     if ui.button("Delete").on_hover_text("Hotkey: Del / X").clicked() {
                         self.try_delete_selected();
                     }
@@ -908,7 +916,11 @@ impl eframe::App for App {
                     }
                 } else if resp.primary_clicked {
                     if let Some(ray) = &resp.pointer_ray {
-                        tools::handle_click(&mut self.doc, &mut self.tool_state, &mut self.sel, ray, eye);
+                        if let Some(status) =
+                            tools::handle_click(&mut self.doc, &mut self.tool_state, &mut self.sel, ray, eye)
+                        {
+                            self.status = status;
+                        }
                     }
                 }
                 self.was_down = down_now;

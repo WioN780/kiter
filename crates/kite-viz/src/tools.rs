@@ -20,6 +20,7 @@ pub enum Tool {
     Junction,
     Pin,
     StiffJoint,
+    Lashing,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
@@ -514,39 +515,88 @@ pub fn pick_point(positions: &[DVec3], ray: &Ray, eye: DVec3) -> Option<usize> {
     best.map(|(_, i)| i)
 }
 
+/// Picks the nearest bridle interior "knot" node hit by `ray`: a virtual
+/// point at `k/num_segments` straight-line fraction between a chained
+/// bridle's two endpoints (only bridles with `num_segments >= 2` have any).
+/// Mirrors `pick`'s point radius/priority test, just against these computed
+/// positions instead of `doc.points`. Used by the Bridle tool to snap a new
+/// endpoint onto an existing bridle's interior node (a bridle-to-bridle
+/// knot) when the click misses every real point.
+pub fn pick_bridle_node(doc: &EditorDoc, ray: &Ray, eye: DVec3) -> Option<(usize, usize, usize)> {
+    let mut best: Option<(f64, usize, usize, usize)> = None;
+    for (bi, b) in doc.bridles.iter().enumerate() {
+        let n = b.num_segments;
+        if n < 2 {
+            continue;
+        }
+        let from = doc.points[b.a];
+        let to = doc.points[b.b];
+        for k in 1..n {
+            let p = from.lerp(to, k as f64 / n as f64);
+            let radius = (0.03 * (p - eye).length()).max(0.03);
+            let t = (p - ray.origin).dot(ray.dir);
+            if t < 0.0 {
+                continue;
+            }
+            let closest = ray.origin + ray.dir * t;
+            if (closest - p).length() < radius && best.is_none_or(|(bt, ..)| t < bt) {
+                best = Some((t, bi, k, n));
+            }
+        }
+    }
+    best.map(|(_, bi, k, n)| (bi, k, n))
+}
+
 /// Dispatches a click for the non-Select tools (Select's click+drag is
-/// handled directly in `App` since it needs press/release edges).
-pub fn handle_click(doc: &mut EditorDoc, state: &mut ToolState, sel: &mut SelectionSet, ray: &Ray, eye: DVec3) {
+/// handled directly in `App` since it needs press/release edges). Returns a
+/// status-line message when the click did something worth calling out beyond
+/// the obvious (currently: bridle-to-bridle knot snapping).
+pub fn handle_click(doc: &mut EditorDoc, state: &mut ToolState, sel: &mut SelectionSet, ray: &Ray, eye: DVec3) -> Option<String> {
     match state.tool {
-        Tool::Select => {}
+        Tool::Select => None,
         Tool::AddPoint => {
             if let Some(p) = ray_plane(ray, DVec3::ZERO, DVec3::Y) {
                 let i = doc.weld_point(p);
                 sel.set(Selection::Point(i));
             }
+            None
         }
         Tool::Spar | Tool::Bridle | Tool::Panel => {
-            if let Selection::Point(i) = pick(doc, ray, eye) {
-                if state.pending.last() != Some(&i) {
-                    state.pending.push(i);
-                }
-                let need = if state.tool == Tool::Panel { 3 } else { 2 };
-                if state.pending.len() >= need {
-                    let pts: Vec<usize> = state.pending.drain(..).collect();
-                    sel.set(match state.tool {
-                        Tool::Spar => Selection::Spar(doc.add_spar(pts[0], pts[1])),
-                        Tool::Bridle => Selection::Bridle(doc.add_bridle(pts[0], pts[1])),
-                        Tool::Panel => Selection::Panel(doc.add_panel(pts[0], pts[1], pts[2])),
-                        _ => unreachable!(),
-                    });
-                }
+            let (i, status) = match pick(doc, ray, eye) {
+                Selection::Point(i) => (i, None),
+                _ if state.tool == Tool::Bridle => match pick_bridle_node(doc, ray, eye) {
+                    Some((bi, k, n)) => {
+                        let b = &doc.bridles[bi];
+                        let pos = doc.points[b.a].lerp(doc.points[b.b], k as f64 / n as f64);
+                        let name = b.name.clone();
+                        let idx = doc.weld_point(pos);
+                        (idx, Some(format!("snapped to node {k}/{n} of {name}")))
+                    }
+                    None => return None,
+                },
+                _ => return None,
+            };
+            if state.pending.last() != Some(&i) {
+                state.pending.push(i);
             }
+            let need = if state.tool == Tool::Panel { 3 } else { 2 };
+            if state.pending.len() >= need {
+                let pts: Vec<usize> = state.pending.drain(..).collect();
+                sel.set(match state.tool {
+                    Tool::Spar => Selection::Spar(doc.add_spar(pts[0], pts[1])),
+                    Tool::Bridle => Selection::Bridle(doc.add_bridle(pts[0], pts[1])),
+                    Tool::Panel => Selection::Panel(doc.add_panel(pts[0], pts[1], pts[2])),
+                    _ => unreachable!(),
+                });
+            }
+            status
         }
         Tool::Junction => {
             if let Selection::Point(i) = pick(doc, ray, eye) {
                 doc.junction = Some(i);
                 sel.set(Selection::Point(i));
             }
+            None
         }
         Tool::Pin => {
             if let Selection::Point(i) = pick(doc, ray, eye) {
@@ -555,12 +605,21 @@ pub fn handle_click(doc: &mut EditorDoc, state: &mut ToolState, sel: &mut Select
                 }
                 sel.set(Selection::Point(i));
             }
+            None
         }
         Tool::StiffJoint => {
             if let Selection::Point(i) = pick(doc, ray, eye) {
                 doc.toggle_stiff_joint(i);
                 sel.set(Selection::Point(i));
             }
+            None
+        }
+        Tool::Lashing => {
+            if let Selection::Point(i) = pick(doc, ray, eye) {
+                doc.toggle_lashing(i);
+                sel.set(Selection::Point(i));
+            }
+            None
         }
     }
 }
@@ -632,5 +691,36 @@ mod tests {
         assert_eq!(doc.points.len(), 3, "one point removed");
         assert_eq!(doc.spars.len(), 0, "both spars gone: one cascaded, one direct");
         let _ = spar_dependent; // only referenced for documentation above
+    }
+
+    #[test]
+    fn bridle_click_snaps_to_nearest_interior_node() {
+        let mut doc = EditorDoc::default();
+        let a = doc.weld_point(DVec3::new(0.0, 0.0, 0.0));
+        let b = doc.weld_point(DVec3::new(3.0, 0.0, 0.0));
+        let bi = doc.add_bridle(a, b);
+        doc.bridles[bi].num_segments = 3; // interior nodes at x = 1.0 and x = 2.0
+
+        // Straight down through (2, 0, z) hits the node at x=2 (k=2 of 3).
+        let ray = Ray { origin: DVec3::new(2.0, 0.0, 5.0), dir: DVec3::new(0.0, 0.0, -1.0) };
+        let eye = DVec3::new(2.0, 0.0, 5.0);
+        assert_eq!(pick_bridle_node(&doc, &ray, eye), Some((bi, 2, 3)));
+
+        // Feeding that ray through the Bridle tool's click handler welds a
+        // new point at the node and queues it as the first pending endpoint.
+        let mut state = ToolState { tool: Tool::Bridle, pending: Vec::new() };
+        let mut sel = SelectionSet::default();
+        let status = handle_click(&mut doc, &mut state, &mut sel, &ray, eye);
+        assert_eq!(status, Some("snapped to node 2/3 of bridle_1".to_string()));
+        assert_eq!(state.pending.len(), 1);
+        let snapped = state.pending[0];
+        assert!((doc.points[snapped] - DVec3::new(2.0, 0.0, 0.0)).length() < 1e-9);
+
+        // A single-segment bridle has no interior nodes to snap to.
+        let mut doc2 = EditorDoc::default();
+        let a2 = doc2.weld_point(DVec3::new(0.0, 0.0, 0.0));
+        let b2 = doc2.weld_point(DVec3::new(3.0, 0.0, 0.0));
+        doc2.add_bridle(a2, b2); // default num_segments == 1
+        assert_eq!(pick_bridle_node(&doc2, &ray, eye), None);
     }
 }
