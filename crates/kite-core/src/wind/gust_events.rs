@@ -2,7 +2,7 @@ use glam::DVec3;
 use serde::{Deserialize, Serialize};
 
 /// A discrete spatial 1-cosine gust event.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct GustEvent {
     /// Time when the gust front passes the origin (t_start in seconds).
     pub start_time: f64,

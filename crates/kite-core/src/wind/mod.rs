@@ -25,7 +25,7 @@ thread_local! {
 }
 
 /// Configuration for the wind field, including shear, turbulence, and gusts.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct WindConfig {
     /// Reference wind speed (m/s) at reference height.

@@ -74,7 +74,7 @@ pub struct SimOverrides {
 // Editor-side element records (index-based)
 // ---------------------------------------------------------------------
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct SparItem {
     pub name: String,
     pub a: usize,
@@ -86,7 +86,7 @@ pub struct SparItem {
     pub density: f64,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PanelItem {
     pub name: String,
     pub a: usize,
@@ -100,7 +100,7 @@ pub struct PanelItem {
     pub areal_density: f64,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct BridleItem {
     pub name: String,
     pub a: usize,
@@ -114,7 +114,7 @@ pub struct BridleItem {
 
 /// A bend-twist lock at a point index, freezing the as-built angle between
 /// every spar segment touching it (masterplan's stiff-junction feature).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct StiffJointItem {
     pub point: usize,
     pub compliance: f64,
@@ -124,12 +124,16 @@ pub struct StiffJointItem {
 /// constraint between the nearest node of each of two different spars,
 /// position-only (free pivot) — unlike `StiffJointItem`, which also locks
 /// bend/twist and requires a shared welded node.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct LashingItem {
     pub point: usize,
     pub compliance: f64,
 }
 
+/// Cloned wholesale into the undo/redo stacks (`App::undo_stack` /
+/// `redo_stack` in app.rs) on every committed edit; compared with `==` to
+/// decide whether an edit actually changed anything worth a history entry.
+#[derive(Clone, PartialEq)]
 pub struct EditorDoc {
     pub name: String,
     pub gravity: DVec3,

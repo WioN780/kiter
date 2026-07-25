@@ -77,7 +77,20 @@ pub struct App {
     /// Wind arrow grid / streak particles overlay; survives mode switches
     /// and New/Load like `view` does (it's a viewer setting, not doc state).
     windviz: WindViz,
+    /// Ctrl+Z / Ctrl+Shift+Z history: whole-doc snapshots taken right before
+    /// each committed edit. Coarse (clones the whole doc) rather than a diff
+    /// log, since docs are small and this is a dev tool, not a hot path.
+    undo_stack: Vec<EditorDoc>,
+    redo_stack: Vec<EditorDoc>,
+    /// Doc snapshot from before the edit currently in progress (pointer held
+    /// down or a text field focused); held here across frames so a multi-frame
+    /// drag or a field's worth of keystrokes commits as a single undo step,
+    /// pushed onto `undo_stack` once the interaction ends.
+    pending_undo: Option<EditorDoc>,
 }
+
+/// Cap on `undo_stack`/`redo_stack` length; oldest entries are dropped past this.
+const UNDO_CAP: usize = 200;
 
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
@@ -97,6 +110,9 @@ impl App {
             status: String::new(),
             session: None,
             windviz: WindViz::new(),
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
+            pending_undo: None,
         }
     }
 
@@ -109,6 +125,38 @@ impl App {
         self.scenario_name = self.doc.name.clone();
         self.status = "New scenario".to_string();
         self.session = None;
+        self.undo_stack.clear();
+        self.redo_stack.clear();
+        self.pending_undo = None;
+    }
+
+    /// Reverts to the doc before the last committed edit, pushing the
+    /// current doc onto `redo_stack`. Selection/tool state is reset since an
+    /// undo can change point indices out from under it (same reasoning as
+    /// `delete_point`'s reindex).
+    fn undo(&mut self) {
+        if let Some(prev) = self.undo_stack.pop() {
+            let cur = std::mem::replace(&mut self.doc, prev);
+            self.redo_stack.push(cur);
+            self.after_doc_swap();
+        }
+    }
+
+    fn redo(&mut self) {
+        if let Some(next) = self.redo_stack.pop() {
+            let cur = std::mem::replace(&mut self.doc, next);
+            self.undo_stack.push(cur);
+            self.after_doc_swap();
+        }
+    }
+
+    fn after_doc_swap(&mut self) {
+        self.sel.clear();
+        self.tool_state.pending.clear();
+        self.gizmo_drag = None;
+        self.box_select_start = None;
+        self.dragging = None;
+        self.pending_delete = None;
     }
 
     fn load(&mut self, name: &str) {
@@ -125,6 +173,9 @@ impl App {
                 self.scenario_name = name.to_string();
                 self.status = format!("Loaded {name}");
                 self.session = None;
+                self.undo_stack.clear();
+                self.redo_stack.clear();
+                self.pending_undo = None;
             }
             Err(e) => self.status = format!("Load failed: {e}"),
         }
@@ -211,7 +262,7 @@ impl App {
         if ui.memory(|m| m.focused()).is_some() {
             return;
         }
-        let (esc, q, p, s, f, b, j, n, k, l, del) = ui.input(|i| {
+        let (esc, q, p, s, f, b, j, n, k, l, del, undo, redo) = ui.input(|i| {
             (
                 i.key_pressed(egui::Key::Escape),
                 i.key_pressed(egui::Key::Q),
@@ -224,8 +275,17 @@ impl App {
                 i.key_pressed(egui::Key::K),
                 i.key_pressed(egui::Key::L),
                 i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::X),
+                i.modifiers.command && !i.modifiers.shift && i.key_pressed(egui::Key::Z),
+                (i.modifiers.command && i.modifiers.shift && i.key_pressed(egui::Key::Z))
+                    || (i.modifiers.command && i.key_pressed(egui::Key::Y)),
             )
         });
+        if undo {
+            self.undo();
+        }
+        if redo {
+            self.redo();
+        }
         if esc {
             self.tool_state.pending.clear();
             if let Some(drag) = self.gizmo_drag.take() {
@@ -701,6 +761,11 @@ impl eframe::App for App {
             });
         });
 
+        // Undo/redo baseline: taken after New/Load/Save (which manage the
+        // stacks themselves) so only edits made from here on this frame
+        // (inspector fields, viewport tools/drags, hotkeys) are tracked.
+        let doc_before_frame = self.doc.clone();
+
         egui::Panel::left("inspector").show(ui, |ui| match self.mode {
             Mode::Edit => panels::inspector(ui, &mut self.doc, &mut self.sel, &mut self.view, &mut self.windviz),
             Mode::Simulate => {
@@ -972,6 +1037,27 @@ impl eframe::App for App {
                 }
             }
         });
+
+        // Commit the undo baseline. While the pointer is held down (viewport
+        // drag, inspector slider) or a text field has focus (name/number
+        // entry), the whole interaction is still "in progress" — hold the
+        // pre-interaction snapshot in `pending_undo` instead of pushing every
+        // frame, so it lands as one undo step once released/unfocused.
+        let interacting = ui.input(|i| i.pointer.primary_down()) || ui.memory(|m| m.focused().is_some());
+        if interacting {
+            if self.pending_undo.is_none() {
+                self.pending_undo = Some(doc_before_frame);
+            }
+        } else {
+            let baseline = self.pending_undo.take().unwrap_or(doc_before_frame);
+            if baseline != self.doc {
+                self.undo_stack.push(baseline);
+                if self.undo_stack.len() > UNDO_CAP {
+                    self.undo_stack.remove(0);
+                }
+                self.redo_stack.clear();
+            }
+        }
     }
 }
 

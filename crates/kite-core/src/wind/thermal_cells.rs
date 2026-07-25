@@ -10,7 +10,7 @@ use glam::DVec3;
 use serde::{Deserialize, Serialize};
 
 /// A drifting thermal column of rising (or sinking, negative strength) air.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ThermalCell {
     /// Column axis position (at `start_time`), on the ground plane.
     pub center: DVec3,
