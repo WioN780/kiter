@@ -97,7 +97,7 @@ pub struct World {
     /// Duration of the last XPBD substep (`dt / substeps`) from the last `step()` call.
     ///
     /// XPBD force readback is `lambda / h^2`; after `step()`, each constraint's `lambda`
-    /// holds the value from its LAST substep only (lambda resets every substep) — this is
+    /// holds the value from its LAST substep only (lambda resets every substep). This is
     /// an end-of-step snapshot, adequate for visualization but not a substep-accurate force
     /// history. Consumers must treat `last_h == 0.0` as "no step yet, force = 0".
     pub last_h: f64,
@@ -274,8 +274,8 @@ impl World {
             let relative = q1.conjugate() * q2;
             let val = relative.xyz();
 
-            // Note that Darboux vector has scaling term: let's match the constraint C
-            // For energy we compute delta = C = (relative_vec - rest_value)
+            // The Darboux vector has a scaling term, so match the constraint C:
+            // energy uses delta = C = (relative_vec - rest_value).
             let delta = val - b.rest_value;
 
             // Compliance mapping (pressure dependent for LE, folded factor if luffed)

@@ -1,8 +1,8 @@
 //! Milestone 10a acceptance: added-mass correction (masterplan §6.4).
 //!
 //! A free rigid panel driven by a constant normal force must accelerate at
-//! F/(M + m_a) with the correction enabled — the implicit rescaling scheme
-//! reproduces that steady rate exactly — and at F/M with it disabled.
+//! F/(M + m_a) with the correction enabled (the implicit rescaling scheme
+//! reproduces that steady rate exactly) and at F/M with it disabled.
 
 use glam::DVec3;
 use kite_core::aero::unsteady::panel_added_mass;

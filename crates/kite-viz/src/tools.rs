@@ -1,6 +1,6 @@
 //! Edit-mode tools: picking (CPU ray tests against the doc's geometry), the
 //! multi-click tool state machine, and the mutations each tool performs.
-//! Camera dragging/orbiting stays inside `Viewport` — this module only
+//! Camera dragging/orbiting stays inside `Viewport`; this module only
 //! consumes the `Ray` it hands back.
 
 use eframe::egui;
@@ -107,7 +107,7 @@ impl SelectionSet {
             self.0.push(s);
         }
     }
-    /// `Some` only when exactly one element is selected — drives the
+    /// `Some` only when exactly one element is selected, drives the
     /// full-inspector-vs-"N selected" split in the inspector panel.
     pub fn single(&self) -> Option<Selection> {
         (self.0.len() == 1).then(|| self.0[0])
@@ -190,7 +190,7 @@ pub fn centroid(doc: &EditorDoc, points: &[usize]) -> Option<DVec3> {
 }
 
 /// The two unit vectors spanning the plane perpendicular to `axis`, ordered
-/// so `axis.dir() == u.cross(v)` — i.e. rotating a point at `u` by +90°
+/// so `axis.dir() == u.cross(v)`, i.e. rotating a point at `u` by +90°
 /// about `axis` (right-hand rule) lands it at `v`. Used both to draw each
 /// rotation ring and to measure the drag angle around it.
 fn ring_basis(axis: GizmoAxis) -> (DVec3, DVec3) {
@@ -202,7 +202,7 @@ fn ring_basis(axis: GizmoAxis) -> (DVec3, DVec3) {
 }
 
 /// World-space points of the rotation ring for `axis`, centered at `center`
-/// with radius `radius` — a plain polyline loop, drawn via `SceneData::lines`
+/// with radius `radius`, a plain polyline loop, drawn via `SceneData::lines`
 /// like any other segment (no dedicated ring primitive needed).
 pub fn gizmo_ring_points(center: DVec3, axis: GizmoAxis, radius: f64) -> Vec<DVec3> {
     const SEGMENTS: usize = 48;
@@ -218,7 +218,7 @@ pub fn gizmo_ring_points(center: DVec3, axis: GizmoAxis, radius: f64) -> Vec<DVe
 /// Angle (radians) of world point `p`, projected onto the plane through
 /// `center` perpendicular to `axis`, measured from `ring_basis(axis).0`
 /// toward `.1`. Two calls' difference is the signed rotation swept between
-/// them — that's all the rotate-drag needs.
+/// them, that's all the rotate-drag needs.
 pub fn ring_angle(center: DVec3, axis: GizmoAxis, p: DVec3) -> f64 {
     let (u, v) = ring_basis(axis);
     let rel = p - center;
@@ -310,8 +310,8 @@ pub fn points_in_rect(doc: &EditorDoc, view_proj: glam::Mat4, viewport_rect: egu
 }
 
 /// Deletes every selected element. Non-point types are removed by index
-/// (descending, per type) *before* any points, so a point's cascade delete
-/// — which may re-remove an element that was also directly selected — never
+/// (descending, per type) *before* any points, so a point's cascade delete,
+/// which may re-remove an element that was also directly selected, never
 /// has to chase a stale index: by the time points are deleted, every
 /// directly-selected spar/panel/bridle is already gone and the cascading
 /// `retain` in `delete_point` is simply a no-op for those.
@@ -643,7 +643,7 @@ mod tests {
     #[test]
     fn ring_angle_and_pick_agree_on_rotation_sense() {
         // Z-axis ring: basis is (X, Y), so a point straight out along +X
-        // reads as angle 0 and +Y as +90° — a +90° rotation about +Z takes
+        // reads as angle 0 and +Y as +90°, a +90° rotation about +Z takes
         // +X to +Y, matching DQuat::from_axis_angle's right-hand convention.
         let center = DVec3::ZERO;
         let a0 = ring_angle(center, GizmoAxis::Z, DVec3::X);
@@ -684,7 +684,7 @@ mod tests {
         let spar_direct = doc.add_spar(p2, p3); // directly selected, independent of deleted points
 
         // Select p0 (drags spar_dependent down with it via cascade) and also
-        // directly select spar_direct — mixed point + non-point selection.
+        // directly select spar_direct: mixed point + non-point selection.
         let sels = [Selection::Point(p0), Selection::Spar(spar_direct)];
         delete_selected(&mut doc, &sels);
 

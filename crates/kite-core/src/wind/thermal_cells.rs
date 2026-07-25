@@ -3,7 +3,7 @@
 //! grow and dissipate over their lifetime.
 //!
 //! Each cell contributes only a vertical velocity whose magnitude depends on
-//! horizontal distance from the (drifting) column axis — so the field is
+//! horizontal distance from the (drifting) column axis, so the field is
 //! *analytically divergence-free*: v_x = v_z = 0 and ∂v_y/∂y = 0.
 
 use glam::DVec3;

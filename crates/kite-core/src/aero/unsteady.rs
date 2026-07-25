@@ -1,4 +1,4 @@
-//! Unsteady aerodynamic corrections (masterplan §6.4) — the `aero_correction`
+//! Unsteady aerodynamic corrections (masterplan §6.4): the `aero_correction`
 //! seam called after the base panel-method forces each substep.
 //!
 //! Currently implements **added mass**: a light fabric panel accelerating
@@ -12,9 +12,9 @@
 //! all force kicks, the change in the panel's mean normal velocity since the
 //! previous substep is rescaled by M/(M + m_a) (M = summed vertex mass). An
 //! explicit F = -m_a·dv/dt force diverges whenever m_a exceeds the fabric
-//! mass — which is the *typical* case for kite canopy (displaced air is
-//! heavier than the fabric) — while this form is unconditionally stable and
-//! reproduces the exact steady dynamics a = F/(M + m_a).
+//! mass, the typical case for kite canopy (displaced air is heavier than
+//! the fabric). This form is unconditionally stable instead and reproduces
+//! the exact steady dynamics a = F/(M + m_a).
 //!
 //! Dynamic-stall lag remains deferred: the base model
 //! (`flat_plate_coefficients`) has no stall curve to lag yet.

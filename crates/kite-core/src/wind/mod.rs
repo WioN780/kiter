@@ -18,7 +18,7 @@ thread_local! {
     // spar segment / substep). The field is fully determined by
     // (seed, length_scale, octaves), so cache the last-built one per thread
     // instead of reconstructing it every call. This is a pure memoization of
-    // a deterministic function of `cfg` — it changes no observable output and
+    // a deterministic function of `cfg`: it changes no observable output and
     // introduces no cross-call state dependence, so it preserves `World::step`
     // determinism/purity despite the thread-local storage.
     static FIELD_CACHE: RefCell<Option<(u64, usize, CurlNoiseField)>> = const { RefCell::new(None) };

@@ -6,7 +6,7 @@
 //! `to_scenario`/`from_scenario` convert to/from the coordinate-based
 //! `KiteDefinition` that kite-core actually consumes; kite-core re-welds
 //! coincident coordinates within 1mm on build, so an index shared by two
-//! elements here always maps to identical coordinates there — round-trip
+//! elements here always maps to identical coordinates there, round-trip
 //! stable by construction.
 
 use std::collections::HashSet;
@@ -122,7 +122,7 @@ pub struct StiffJointItem {
 
 /// A spar-to-spar lashing (zip-tie) at a point index: a stiff distance
 /// constraint between the nearest node of each of two different spars,
-/// position-only (free pivot) — unlike `StiffJointItem`, which also locks
+/// position-only (free pivot), unlike `StiffJointItem`, which also locks
 /// bend/twist and requires a shared welded node.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LashingItem {
@@ -542,7 +542,7 @@ mod tests {
     /// simple_kite_v1.toml -> EditorDoc -> Scenario must preserve the kite
     /// sub-tree and the pass-through top-level fields exactly (allowing for
     /// the doc's own added defaults, e.g. an absent `[sim]` table, and for
-    /// `KiteDefinition::name` collapsing into the single `EditorDoc::name` —
+    /// `KiteDefinition::name` collapsing into the single `EditorDoc::name`:
     /// the editor has one name field, so a kite name that originally
     /// differed from the scenario name does not survive the round trip;
     /// that's an accepted, documented lossy spot, not a bug).

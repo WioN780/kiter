@@ -33,7 +33,7 @@ impl Default for ViewToggles {
 
 /// What a `GizmoDrag` does with the per-frame ray: slide points along an
 /// axis, or spin them around one. Fixed at press time from the Alt modifier
-/// (mirrored by which handle — arrow vs ring — was actually picked), so
+/// (mirrored by which handle, arrow vs ring, was actually picked), so
 /// toggling Alt mid-drag can't switch a drag already in progress.
 enum GizmoDragKind {
     /// Point on the axis line picked up at press time; the reference the
@@ -205,7 +205,7 @@ impl App {
 
     fn try_delete_selected(&mut self) {
         // Multiple elements: skip the single-point cascade-confirm dialog
-        // (ponytail: minimal path — deleting several points and eyeballing
+        // (ponytail: minimal path, deleting several points and eyeballing
         // "does this look like a lot of stuff" is on the user; the dialog
         // only guards the easy-to-fat-finger single-point case).
         if self.sel.len() > 1 {
@@ -412,7 +412,7 @@ fn build_scene(doc: &EditorDoc, sel: &SelectionSet, tool_state: &ToolState, view
 
     // Translate/rotate gizmo: three world-axis arrows (or, with Alt held,
     // rotation rings) anchored at the centroid of the selection, drawn last
-    // so they land on top of the scene. Only in the Select tool — other
+    // so they land on top of the scene. Only in the Select tool: other
     // tools have their own click semantics and showing drag handles there
     // would be misleading.
     if tool_state.tool == Tool::Select && !sel.is_empty() {
@@ -500,7 +500,7 @@ impl SimView<'_> {
             SimView::Snap(s) => {
                 // ponytail: `panel_aero` is only populated once `step` runs
                 // the aero solve, so the pre-step history[0] snapshot has it
-                // empty even when the kite has panels — guard like the Live
+                // empty even when the kite has panels, guard like the Live
                 // branch instead of indexing straight in.
                 let a = s.panel_aero.get(i).copied().unwrap_or_default();
                 (a.lift.as_dvec3(), a.drag.as_dvec3(), a.alpha as f64)
@@ -711,7 +711,7 @@ impl eframe::App for App {
                     self.mode = Mode::Simulate;
                     // First entry builds the live world; subsequent toggles
                     // back into Simulate reuse the existing session (and its
-                    // history) — Apply & Restart is the explicit rebuild path.
+                    // history); Apply & Restart is the explicit rebuild path.
                     if self.session.is_none() {
                         self.session = Some(SimSession::new(&self.doc));
                     }
@@ -1040,7 +1040,7 @@ impl eframe::App for App {
 
         // Commit the undo baseline. While the pointer is held down (viewport
         // drag, inspector slider) or a text field has focus (name/number
-        // entry), the whole interaction is still "in progress" — hold the
+        // entry), the whole interaction is still "in progress"; hold the
         // pre-interaction snapshot in `pending_undo` instead of pushing every
         // frame, so it lands as one undo step once released/unfocused.
         let interacting = ui.input(|i| i.pointer.primary_down()) || ui.memory(|m| m.focused().is_some());

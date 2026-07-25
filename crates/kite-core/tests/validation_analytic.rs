@@ -1095,7 +1095,7 @@ fn test_canopy_panel_aerodynamics() {
 /// `w(xi) = (p+1)(1-xi)^p` at that panel's station `xi` along the *sail* chord,
 /// renormalized area-weighted. For a RECTANGULAR plate the area is distributed
 /// uniformly in `xi`, so the load centroid must land on the continuum value
-/// `\int xi w dxi = 1/(p+2) = x_bar` — an analytic target this test can check
+/// `\int xi w dxi = 1/(p+2) = x_bar`, an analytic target this test can check
 /// without re-implementing the code's own arithmetic. The test asserts:
 ///
 ///   1. the redistribution leaves the total resultant exactly unchanged;

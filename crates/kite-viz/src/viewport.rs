@@ -5,7 +5,7 @@
 use crate::render::{FrameCallback, GpuResources, SceneData};
 use eframe::{egui, egui_wgpu};
 
-// ponytail: fields are unread within this crate — they're the frozen surface
+// ponytail: fields are unread within this crate; they're the frozen surface
 // T3 (editor tools) and T4 (simulation playback) consume; allow(dead_code)
 // instead of contriving a fake internal use.
 #[allow(dead_code)]

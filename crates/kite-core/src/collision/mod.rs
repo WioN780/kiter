@@ -20,7 +20,7 @@ pub struct ContactConstraint {
 }
 
 /// Contact thickness (m) shared by self-collision detection and the contact
-/// solve — must stay a single constant so the detection margin and the solved
+/// solve. Must stay a single constant so the detection margin and the solved
 /// separation cannot drift apart.
 const CONTACT_THICKNESS: f64 = 0.01;
 

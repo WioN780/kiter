@@ -257,7 +257,7 @@ fn stiff_junction_holds_cantilever_near_build_height() {
         // up as tip droop that has nothing to do with the junction's stiffness:
         // measured 0.0282, 0.0153, 0.0088, 0.0055, 0.0038, 0.0030 m for
         // iterations_per_substep = 1, 2, 4, 8, 16, 32. It is a solver convergence
-        // rate, not a physical deflection — stiffening the supporting spar's E by
+        // rate, not a physical deflection: stiffening the supporting spar's E by
         // 10^4 moves it only from 0.0282 to 0.0258 m. So give the solve enough
         // sweeps to actually resolve the coupling before asserting a physical
         // property of the junction.
@@ -378,7 +378,7 @@ fn bridle_to_bridle_knot_welds_regardless_of_listing_order() {
     world.cfg.gravity = DVec3::new(0.0, -9.81, 0.0);
     build_kite_from_def(&mut world, &def);
 
-    // Exactly one particle at the knot coordinate — no duplicate created because A was
+    // Exactly one particle at the knot coordinate: no duplicate created because A was
     // built before B's interior node existed.
     let near_count = (0..world.particles.len())
         .filter(|&i| (world.particles.pos[i] - b_mid).length() < 1e-4)

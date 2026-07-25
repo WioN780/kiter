@@ -24,7 +24,7 @@ struct Streak {
 }
 
 /// splitmix64: tiny, dependency-free PRNG. Cosmetic randomness only (streak
-/// respawn positions) — not part of any simulation state, so it doesn't need
+/// respawn positions), not part of any simulation state, so it doesn't need
 /// to route through `World`'s seeded RNG (masterplan rule 6 is about
 /// engine determinism; this is a debug-viz particle spawner).
 fn next_u64(state: &mut u64) -> u64 {

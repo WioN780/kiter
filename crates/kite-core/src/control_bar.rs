@@ -2,7 +2,7 @@
 //!
 //! The bar is a genuinely rigid accessory, so it is modeled with Rapier's
 //! *real* dynamics (`RigidBodySet` + a spherical joint pinning the bar
-//! center to the pilot's hands) — the one place Rapier dynamics is allowed.
+//! center to the pilot's hands), the one place Rapier dynamics is allowed.
 //! Coupling to the XPBD world happens **only at the two anchor particles**
 //! (masterplan §5.4/§5.5 boundary-exchange pattern), once per substep:
 //!
@@ -17,7 +17,7 @@
 //!
 //! Stability: this is an *explicit* staggered coupling. A slack line that
 //! snaps taut against a fast-moving tip resolves its whole position violation
-//! in one substep, and F = λ/h² feeds that back as an impulsive kick — which
+//! in one substep, and F = λ/h² feeds that back as an impulsive kick. That
 //! can positively feed back and diverge if the line-side inertia rivals the
 //! bar's. Keep the bar heavy relative to per-substep line impulses (true for
 //! real kite rigs: aero damping keeps line tension smooth).

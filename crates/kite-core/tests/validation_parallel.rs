@@ -6,7 +6,7 @@
 //!   insertion order). For scenes with a *unique* equilibrium the two modes
 //!   must converge to the same answer tightly; that's what the chain and rod
 //!   scenes assert per constraint kernel.
-//! - A wrinkling cloth is *bistable* — solve-order perturbation can select a
+//! - A wrinkling cloth is *bistable*: solve-order perturbation can select a
 //!   different fold ~mm apart. The cloth test therefore only asserts loose
 //!   agreement plus convergence, and documents that this is expected physics,
 //!   not solver drift.
@@ -14,7 +14,7 @@
 //!   execution itself is bit-deterministic run-to-run.
 //!
 //! Under `reference-mode` the parallel path is compiled out, making every
-//! comparison here vacuous (serial vs serial) — so the whole file is skipped.
+//! comparison here vacuous (serial vs serial), so the whole file is skipped.
 #![cfg(not(feature = "reference-mode"))]
 
 use glam::{DQuat, DVec3};
@@ -197,7 +197,7 @@ fn test_parallel_matches_serial_rods() {
     // serial vs parallel differ by an amount that shrinks as iterations rise
     // (probed: gap 4.4e-3 @ 2 iters → 1.1e-3 @ 8 iters → 3.6e-4 @ 20 iters,
     // both modes converging toward the Euler-Bernoulli deflection). Assert
-    // both the absolute bound at the cheap setting and the shrink trend —
+    // both the absolute bound at the cheap setting and the shrink trend:
     // a genuine kernel-math divergence would fail the trend.
     let serial_2 = run(&mut make_rod_forest(false), 500);
     let parallel_2 = run(&mut make_rod_forest(true), 500);

@@ -81,7 +81,7 @@ fn test_thermal_lifecycle_envelope() {
 fn test_thermal_drifts_with_configured_velocity() {
     let cell = test_cell();
     let t1 = 21.0; // age 20
-    let t2 = 41.0; // age 40 — symmetric envelope value (sin²(π/3) each side of mid)
+    let t2 = 41.0; // age 40, symmetric envelope value (sin²(π/3) each side of mid)
 
     // The peak (axis) location must move by drift × Δage.
     let axis1 = cell.center + cell.drift * 20.0;

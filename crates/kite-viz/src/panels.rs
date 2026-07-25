@@ -301,7 +301,7 @@ fn row_usize(ui: &mut egui::Ui, label: &str, val: &mut usize, min: usize) -> egu
 
 /// Simulate-mode left panel. Per the live-tinkering invariant (see
 /// `session.rs`), Sim Config/Wind/Gravity widgets here are bound DIRECTLY to
-/// `session.world.cfg` — edits take effect on the next step — and are
+/// `session.world.cfg`; edits take effect on the next step, and are
 /// mirrored back into `doc` afterwards so leaving/re-entering Simulate mode
 /// keeps them. Structural fields (points/elements) are never touched here;
 /// `is_stale` drives the Apply & Restart prompt for those.
@@ -403,8 +403,8 @@ pub fn simulate_inspector(
             });
         });
 
-        // Mirror gravity/wind back into doc every frame unconditionally —
-        // cheap (a handful of Copy fields plus one WindConfig clone) and
+        // Mirror gravity/wind back into doc every frame unconditionally.
+        // Cheap (a handful of Copy fields plus one WindConfig clone) and
         // keeps them synced across a Simulate -> Edit -> Simulate round
         // trip. `doc.sim`'s Option fields are different: they distinguish
         // "explicit override" from "engine default" for scenario-file

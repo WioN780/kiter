@@ -1,53 +1,62 @@
 # Kiter
 
-`kiter` is a high-fidelity, physically-accurate aeroelastic simulation engine designed specifically for kites. 
+Kiter is an aeroelastic simulation engine for kites: rigid/elastic spars,
+woven-fabric canopy, branching bridle lines, panel-method aerodynamics, and a
+non-uniform wind field, all solved with Extended Position-Based Dynamics
+(XPBD).
 
-Currently, the project focuses entirely on the **core simulation engine** (written in Rust). In the future, this engine will power a **web-based CAD application** allowing users to design, simulate, and test custom kites in real-time under realistic weather conditions.
+Right now the project is the simulation engine and a native debug/editor
+tool, both in Rust. A web-based CAD application on top of the same engine is
+a future goal, not part of this repo yet.
 
----
+## How it works
 
-## Technical Architecture
+The physics runs on XPBD rather than a classical force-integration ODE
+solver, which is what lets thin carbon-fiber rods and near-inextensible
+bridle lines stay stable without tiny timesteps. Spars are Cosserat rods
+(bending, torsion, and shear, not just rigid links). The canopy is an
+anisotropic woven-fabric model, so warp, weft, and shear stretch each have
+their own stiffness. Bridle lines are unilateral (tension-only) constraints
+that go slack instead of resisting compression. Aerodynamic loads come from
+a panel-method solver over the canopy triangles, plus separate cylinder drag
+on the spars. Wind is spatially non-uniform: a mean shear profile, advected
+curl-noise turbulence, scripted gusts, and optional thermal cells.
 
-The physics simulation is built from the ground up using **Extended Position-Based Dynamics (XPBD)** for stable, real-time dynamics:
+See `docs/ARCHITECTURE.md` for the full picture.
 
-*   **Spars & Frame:** Modeled as rigid/elastic Cosserat rods supporting bending, torsion, and shear.
-*   **Canopy & Sail:** Modeled with an anisotropic woven-fabric model to match actual fabric stretch.
-*   **Bridle Lines:** Branching cable networks with unilateral (tension-only) constraints.
-*   **Aerodynamics:** A panel-method aerodynamic solver that computes lift, drag, and moment across the canopy panels, combined with specialized spar drag.
-*   **Environment:** Spatially non-uniform, patchy, and turbulent wind fields (utilizing curl noise and mean profile gradients).
+## Repository structure
 
----
-
-## Repository Structure
-
-*   [`crates/kite-core`](file:///D:/Random%20Projects/kites/kiter/crates/kite-core): The core physics engine library (pure math, zero I/O, zero rendering).
-*   [`crates/kite-cli`](file:///D:/Random%20Projects/kites/kiter/crates/kite-cli): A developer command-line tool that loads scenarios, runs simulation steps, and logs outputs.
-*   [`scenarios/`](file:///D:/Random%20Projects/kites/kiter/scenarios): TOML scenario files describing the structure of various kites and test cases.
-
----
+- `crates/kite-core`: the physics engine library (zero I/O, zero rendering).
+  See `docs/kite-core.md`.
+- `crates/kite-cli`: a headless dev binary that loads a scenario, runs it,
+  and can stream it to the `rerun` viewer. See `docs/kite-cli.md`.
+- `crates/kite-viz`: a native egui/wgpu editor and simulation viewer built
+  on `kite-core`. See `docs/kite-viz.md`.
+- `scenarios/`: TOML files describing kites and test cases. See
+  `docs/SCENARIO_FORMAT.md`.
 
 ## Development
 
-### Prerequisites
+You'll need a Rust toolchain installed.
 
-You will need a Rust toolchain installed.
-
-### Build and Test
-
-To build the physics core and CLI:
+Build:
 ```bash
 cargo build -p kite-core
 cargo build -p kite-cli
+cargo build -p kite-viz
 ```
 
-To run the test suite (analytical and validation tests):
+Run the test suite (analytical and validation tests):
 ```bash
 cargo test -p kite-core
 ```
 
-### Running Scenarios
-
-You can run a simulation scenario with the developer CLI:
+Run a scenario headlessly:
 ```bash
 cargo run -p kite-cli -- scenarios/simple_kite_v1.toml
+```
+
+Run the editor/viewer:
+```bash
+cargo run -p kite-viz
 ```

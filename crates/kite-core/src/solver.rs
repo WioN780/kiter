@@ -100,7 +100,7 @@ pub fn step_simulation(world: &mut World, dt: f64) {
         // 1d. Apply canopy aerodynamics to particle velocities
         crate::aero::panel_method::apply_canopy_aerodynamics(world, h);
 
-        // 1d2. Unsteady aero corrections (added mass) — the §6.4 seam,
+        // 1d2. Unsteady aero corrections (added mass): the §6.4 seam,
         // applied after the quasi-steady base forces.
         crate::aero::unsteady::apply_aero_corrections(world, h);
 
@@ -773,8 +773,8 @@ fn greedy_color<T>(
 
 /// Cached color classes for every constraint type, fingerprinted by the
 /// constraint counts so it self-invalidates when constraints are added or
-/// removed between steps. (Constraint *indices* are stable within a run —
-/// breaking flips a state flag, it never removes elements — so counts are
+/// removed between steps. (Constraint *indices* are stable within a run:
+/// breaking flips a state flag, it never removes elements, so counts are
 /// a sufficient staleness signal.)
 pub(crate) struct SolverColoring {
     fingerprint: [usize; 6],

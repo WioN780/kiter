@@ -97,7 +97,7 @@ impl SectionGeometry {
         DVec3::new(i_xy, i_xy, i_z)
     }
 
-    /// Diagonal *inverse* inertia ($I_x^{-1}, I_y^{-1}, I_z^{-1}$) of a segment — the
+    /// Diagonal *inverse* inertia ($I_x^{-1}, I_y^{-1}, I_z^{-1}$) of a segment: the
     /// generalized rotational inverse mass the XPBD solver expects in
     /// `OrientationSet::inv_inertia`. A zero/degenerate principal moment maps to a
     /// zero inverse (rotationally pinned about that axis), matching how the solver

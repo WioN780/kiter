@@ -1,7 +1,7 @@
 //! Milestone 10c acceptance: dynamic control bar (masterplan §5.5).
 //!
 //! The bar is a rigid body pinned at its center to a fixed pilot anchor by a
-//! spherical joint (Rapier — approved for truly rigid accessories only). Kite
+//! spherical joint (Rapier, approved for truly rigid accessories only). Kite
 //! lines couple to it via two kinematic XPBD anchor particles: bar tips drive
 //! the anchors each substep, and the recovered line forces (F = λ/h²) drive
 //! the bar back.
@@ -21,7 +21,7 @@ const DT: f64 = 1.0 / 60.0;
 /// exchange is an *explicit* staggered coupling, so the loaded tip must
 /// accelerate downward slower than g (α·L = m·g·L²/I < g) or the unilateral
 /// line slack-snaps, and each snap feeds an impulsive λ/h² kick back into the
-/// bar — a positive-feedback loop that diverges. Same stability rule any
+/// bar, a positive-feedback loop that diverges. Same stability rule any
 /// co-simulation force exchange has.
 fn make_bar_world(right_mass: Option<f64>) -> (World, usize, usize) {
     let mut world = World::new();
@@ -105,7 +105,7 @@ fn test_asymmetric_load_swings_loaded_tip_down() {
     let (mut world, left, right) = make_bar_world(None);
 
     // The line tension must torque the loaded (-X) tip down and the free tip
-    // up: within the first swing (≲1 s — the bar then swings through like the
+    // up: within the first swing (≲1 s, the bar then swings through like the
     // underdamped pendulum it is) the loaded tip must drop well below the
     // free one. Detecting the crossing rather than sampling a fixed time
     // keeps the test independent of the exact swing phase.

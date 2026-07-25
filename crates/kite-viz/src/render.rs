@@ -227,7 +227,7 @@ fn build_sphere(segs: u32, rings: u32) -> (Vec<VertexPN>, Vec<u32>) {
 
 /// Unit cone: base ring radius 1 at z=0, apex at z=1, with a base cap.
 /// ponytail: normal blend is a fixed 45-degree approximation, not the exact
-/// cone slope normal — fine for small arrowhead accents in a debug view.
+/// cone slope normal, fine for small arrowhead accents in a debug view.
 fn build_cone(segs: u32) -> (Vec<VertexPN>, Vec<u32>) {
     let mut v = Vec::new();
     let mut idx = Vec::new();

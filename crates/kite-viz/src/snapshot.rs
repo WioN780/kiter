@@ -2,7 +2,7 @@
 //! frames of playback history cheap to hold in memory.
 //!
 //! Force sign conventions (see `crates/kite-core/tests/readback.rs`, and
-//! empirically pinned in the task brief — do not re-derive): with
+//! empirically pinned in the task brief, do not re-derive): with
 //! `h = world.last_h` (treat `h == 0` as "no step yet, force 0"):
 //! - spar axial force   = `-stretch_shear.lambda.z / h^2`
 //! - bridle tension      = `-unilateral.lambda / h^2` (always >= 0; 0 = slack)
@@ -29,7 +29,7 @@ pub struct Snapshot {
     pub t: f64,
     pub pos: Vec<glam::Vec3>,
     // ponytail: captured per the data-model contract (rod twist state) but
-    // no current consumer renders it — cylinders are built from endpoint
+    // no current consumer renders it: cylinders are built from endpoint
     // positions only. Wire up when a twist/orientation visualization lands.
     #[allow(dead_code)]
     pub quat: Vec<Quat>,

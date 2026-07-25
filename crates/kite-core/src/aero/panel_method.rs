@@ -84,7 +84,7 @@ fn chordwise_weight(xi: f64, p: f64) -> f64 {
 /// Two earlier formulations of this are both wrong, in ways worth recording:
 ///
 /// * Splitting each panel's force equally over its 3 vertices applies the
-///   resultant at the panel's area centroid — a uniform-pressure assumption.
+///   resultant at the panel's area centroid, a uniform-pressure assumption.
 ///   For a *flat* panel that is mathematically guaranteed to produce zero
 ///   pitching moment about that panel, so a single-panel sail can never trim.
 /// * Offsetting each panel's application point to a center of pressure derived
@@ -92,8 +92,8 @@ fn chordwise_weight(xi: f64, p: f64) -> f64 {
 ///   scales with the sub-triangle, and the up/down-pointing triangles of a
 ///   subdivided mesh have opposite centroid-to-CoP offsets which cancel
 ///   incoherently. Measured on a diamond kite at 25 deg, the whole-sail pitching
-///   moment ran +0.41, -0.59, -1.36, -1.83, -2.35, -2.64 N.m for 4..256 panels —
-///   it changes sign under refinement and never settles.
+///   moment ran +0.41, -0.59, -1.36, -1.83, -2.35, -2.64 N.m for 4..256 panels.
+///   It changes sign under refinement and never settles.
 ///
 /// Scaling per-panel loads by a distribution referenced to the *sail* chord is
 /// mesh-convergent by construction: it is a Riemann sum of a bounded chordwise
@@ -174,7 +174,7 @@ pub fn apply_canopy_aerodynamics(world: &mut World, h: f64) {
     let chord_dir = (v_bar - v_bar.dot(n_bar) * n_bar).normalize_or_zero();
 
     // Center-of-pressure chord fraction, and the loading exponent realizing it.
-    // UNVERIFIED: flat-plate CoP travel — quarter-chord at small |alpha| (exact
+    // UNVERIFIED: flat-plate CoP travel, quarter-chord at small |alpha| (exact
     // thin-airfoil-theory result) blending to mid-chord (uniform pressure) at
     // 90 deg. The 90-deg endpoint is exact for a bluff normal plate; the cosine
     // blend between the two is a standard flight-sim interpolation, not taken

@@ -87,7 +87,7 @@ pub struct StiffJunctionDef {
 
 /// Ties two different spars together at a point (like a zip-tie/lashing): a stiff
 /// distance constraint between the nearest node of each spar, holding their as-built
-/// separation. Position-only (free pivot) — use `stiff_junctions` on a welded node for
+/// separation. Position-only (free pivot); use `stiff_junctions` on a welded node for
 /// full bend-twist locking.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct LashingDef {
@@ -104,7 +104,7 @@ pub struct KiteDefinition {
     pub bridles: Vec<BridleLineDef>,
     pub bridle_junction: DVec3,
     pub bridle_junction_pinned: bool,
-    /// Extra points to pin (inv_mass = 0) after the kite is built — welds to an existing
+    /// Extra points to pin (inv_mass = 0) after the kite is built. Welds to an existing
     /// node within 1mm, or creates a new isolated anchor particle (e.g. for tethers).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pinned_points: Vec<DVec3>,
@@ -137,7 +137,7 @@ pub fn build_kite_from_def(world: &mut World, def: &KiteDefinition) {
     };
 
     // 1. Build Spars
-    // Tracks, per particle, which (spar_id, orientation q_index) pairs touch it — used by
+    // Tracks, per particle, which (spar_id, orientation q_index) pairs touch it. Used by
     // stiff junctions (step 1.5) to find segments from different spars sharing a weld point.
     let mut particle_segments: HashMap<usize, Vec<(usize, usize)>> = HashMap::new();
 
@@ -165,8 +165,8 @@ pub fn build_kite_from_def(world: &mut World, def: &KiteDefinition) {
         // two tips carry half. The nodal masses then sum to exactly the spar's
         // mass (density * area * length) and the mass distribution is symmetric
         // about the spar's midpoint. Giving every one of the n+1 nodes a full
-        // segment mass instead overstates the spar by (n+1)/n — 25% at n = 4,
-        // 50% at n = 2 — and doubles the weighting of the tips, which inflates
+        // segment mass instead overstates the spar by (n+1)/n (25% at n = 4,
+        // 50% at n = 2) and doubles the weighting of the tips, which inflates
         // the kite's moment of inertia about its own centre of mass and so
         // wrongly slows every rotational response.
         //
@@ -251,7 +251,7 @@ pub fn build_kite_from_def(world: &mut World, def: &KiteDefinition) {
         let found = (0..world.particles.len())
             .find(|&i| (world.particles.pos[i] - junction.point).length() < weld_tol);
         let Some(p_idx) = found else {
-            // No welded particle at this point — nothing to stiffen. Not a hard error since
+            // No welded particle at this point, nothing to stiffen. Not a hard error since
             // junctions are declarative and may reference a not-yet-built point; this should
             // not happen in practice for spar intersections, hence the debug_assert.
             debug_assert!(false, "stiff_junction point {:?} did not weld to any particle", junction.point);
@@ -278,7 +278,7 @@ pub fn build_kite_from_def(world: &mut World, def: &KiteDefinition) {
                 // vector; at a 90-degree as-built cross it is a large-angle value. Because we
                 // read it directly from the as-built quaternions (same formula, same instant),
                 // the constraint still reads C = 0 exactly at the build pose and stiffly
-                // resists deviation — but the *shape* of the restoring "stiffness" away from
+                // resists deviation, but the *shape* of the restoring "stiffness" away from
                 // that pose is not verified to match true rotational elasticity at large
                 // deflection. Flagging per AGENTS.md rule 7.
                 let q_a = world.orientations.quat[qa];
@@ -299,7 +299,7 @@ pub fn build_kite_from_def(world: &mut World, def: &KiteDefinition) {
 
     // 1.6 Build spar-to-spar lashings: a stiff distance constraint between the nearest
     // node of each of two different spars, holding their as-built separation
-    // (position-only tie/free pivot — unlike stiff_junctions, which also locks
+    // (position-only tie/free pivot, unlike stiff_junctions, which also locks
     // bend/twist and requires the two spars to already share a welded particle).
     for lashing in &def.lashings {
         // For each spar with a node within 0.25m of `point`, keep only its closest node.
@@ -342,7 +342,7 @@ pub fn build_kite_from_def(world: &mut World, def: &KiteDefinition) {
         let p_a = candidates[0].1;
         let p_b = candidates[1].1;
         if p_a == p_b {
-            continue; // already welded to the same particle — nothing to lash
+            continue; // already welded to the same particle, nothing to lash
         }
 
         // Rule 3 (AGENTS.md): compliance is never literally 0.0 in a division.
@@ -474,7 +474,7 @@ pub fn build_kite_from_def(world: &mut World, def: &KiteDefinition) {
         }
     }
 
-    // 3. Build Dihedral Bending Constraints (detect shared edges via a shared-edge map —
+    // 3. Build Dihedral Bending Constraints (detect shared edges via a shared-edge map,
     // O(n) instead of the old O(n^2) all-pairs scan, needed since subdivision multiplies
     // panel count).
     let mut edge_map: HashMap<(usize, usize), Vec<(usize, usize)>> = HashMap::new();
@@ -484,7 +484,7 @@ pub fn build_kite_from_def(world: &mut World, def: &KiteDefinition) {
             edge_map.entry(key).or_default().push((panel_idx, opp));
         }
     }
-    // Sort for determinism (AGENTS.md rule 6) — HashMap iteration order is not stable.
+    // Sort for determinism (AGENTS.md rule 6): HashMap iteration order is not stable.
     let mut sorted_edges: Vec<_> = edge_map.into_iter().collect();
     sorted_edges.sort_unstable_by_key(|(k, _)| *k);
 
@@ -524,12 +524,12 @@ pub fn build_kite_from_def(world: &mut World, def: &KiteDefinition) {
     // Bridle-to-bridle knots: a bridle's `from`/`to` may coincide with an interior node
     // of ANOTHER bridle line rather than a spar/panel/junction point. Interior nodes only
     // exist once that other bridle has actually been built (its chain particles created),
-    // so build order matters — unlike every other weld in this format, which is
+    // so build order matters, unlike every other weld in this format, which is
     // order-independent because both sides compute the same coordinate. Resolve a build
     // order here so this works regardless of `def.bridles` listing order.
     //
     // Precompute each bridle's prospective interior-node positions purely from the def
-    // (straight-line k/n interpolation — identical math to the chain-building loop below).
+    // (straight-line k/n interpolation, identical math to the chain-building loop below).
     let n_bridles = def.bridles.len();
     let bridle_interior_positions: Vec<Vec<DVec3>> = def
         .bridles
@@ -566,7 +566,7 @@ pub fn build_kite_from_def(world: &mut World, def: &KiteDefinition) {
 
     // Deferred-rounds scheduling: repeatedly build any bridle whose dependencies are
     // already built, until a pass makes no progress. A knot cycle (degenerate, but must
-    // not hang or panic) leaves some bridles unbuilt — append those in def order to break
+    // not hang or panic) leaves some bridles unbuilt; append those in def order to break
     // the cycle deterministically.
     let mut built = vec![false; n_bridles];
     let mut build_order: Vec<usize> = Vec::with_capacity(n_bridles);
@@ -603,7 +603,7 @@ pub fn build_kite_from_def(world: &mut World, def: &KiteDefinition) {
         let seg_rest_len = line.rest_length / n_seg as f64;
 
         // Total line mass, distributed evenly over the interior (newly-created) particles
-        // only — endpoints keep their existing (welded kite/junction) mass.
+        // only. Endpoints keep their existing (welded kite/junction) mass.
         let line_cross_area = std::f64::consts::PI * (line.diameter * 0.5).powi(2);
         let total_line_mass = line.density * line_cross_area * line.rest_length;
         let interior_count = n_seg.saturating_sub(1);

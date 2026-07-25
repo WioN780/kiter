@@ -6,7 +6,7 @@
 //! is safe because cfg-only mutations never touch the constraint `Vec`s, so
 //! `world.coloring` (the cached parallel-solve graph coloring) stays valid.
 //! Structural doc edits (points/spars/panels/bridles) do NOT reach the live
-//! `World` — `SimSession::is_stale` detects them so the UI can offer
+//! `World`; `SimSession::is_stale` detects them so the UI can offer
 //! "Apply & Restart" instead of silently going out of sync.
 
 use std::collections::hash_map::DefaultHasher;
@@ -184,7 +184,7 @@ impl SimSession {
         }
         if steps >= MAX_STEPS_PER_FRAME {
             // ponytail: drop the backlog rather than catching up over
-            // several frames — keeps the UI responsive if the sim can't
+            // several frames, keeps the UI responsive if the sim can't
             // keep up with speed x realtime.
             self.budget = 0.0;
         }
@@ -226,7 +226,7 @@ impl SimSession {
         }
     }
 
-    /// Restores the grabbed particle's original inverse mass VERBATIM — a
+    /// Restores the grabbed particle's original inverse mass VERBATIM: a
     /// particle that was already pinned before the grab stays pinned.
     pub fn release_grab(&mut self) {
         if let Some(g) = self.grab.take() {
@@ -292,7 +292,7 @@ fn hash_dvec3(h: &mut DefaultHasher, v: DVec3) {
 /// `SimSession::is_stale` can cheaply detect "doc edited since the live
 /// world was built" without deriving `PartialEq`/`Hash` across the whole
 /// `kite-core` definition tree (which spans crates). Names/duration/etc are
-/// deliberately excluded — cosmetic fields the live world doesn't consume.
+/// deliberately excluded: cosmetic fields the live world doesn't consume.
 fn structural_hash(doc: &EditorDoc) -> u64 {
     let mut h = DefaultHasher::new();
     for p in &doc.points {
